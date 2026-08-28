@@ -24,7 +24,8 @@ import { validateInput } from './validation';
 
 const scenarioDraftInputSchema = z.strictObject({
   monthlyBudgetMinor: positiveMoneyMinorSchema,
-  startMonth: yearMonthSchema
+  startMonth: yearMonthSchema,
+  algorithm: z.enum(['snowball', 'deadline-aware']).optional()
 });
 
 const renameScenarioInputSchema = z.strictObject({
@@ -36,6 +37,7 @@ const createScenarioInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(80),
   monthlyBudgetMinor: positiveMoneyMinorSchema,
   startMonth: yearMonthSchema,
+  algorithm: z.enum(['snowball', 'deadline-aware']).optional(),
   sourceScenarioId: identifierSchema.nullable().optional()
 });
 
@@ -54,6 +56,7 @@ function debtToScenarioInput(debt: Debt): ScenarioDebtInput {
     name: debt.name,
     balanceMinor: debt.currentBalanceMinor,
     aprBasisPoints: debt.aprBasisPoints,
+    promotionalAprEndsOn: debt.promotionalAprEndsOn,
     minimumPaymentMinor: debt.minimumPaymentMinor,
     createdAt: debt.createdAt,
     balanceSource: debt.balanceSource
@@ -111,6 +114,7 @@ export class ScenarioService {
       currency: settings.currency,
       startMonth: valid.startMonth,
       monthlyBudgetMinor: valid.monthlyBudgetMinor,
+      algorithm: valid.algorithm ?? 'snowball',
       debts: await this.currentDebtSnapshot()
     });
   }
@@ -154,7 +158,7 @@ export class ScenarioService {
       name: valid.name,
       monthlyBudgetMinor: valid.monthlyBudgetMinor,
       startMonth: valid.startMonth,
-      algorithm: 'snowball',
+      algorithm: valid.algorithm ?? 'snowball',
       debtSnapshot,
       sourceScenarioId: valid.sourceScenarioId ?? null,
       createdAt: now,
@@ -188,7 +192,7 @@ export class ScenarioService {
       name: valid.name,
       monthlyBudgetMinor: valid.monthlyBudgetMinor,
       startMonth: valid.startMonth,
-      algorithm: 'snowball',
+      algorithm: valid.algorithm ?? 'snowball',
       debtSnapshot,
       sourceScenarioId: valid.sourceScenarioId ?? null,
       createdAt: now,

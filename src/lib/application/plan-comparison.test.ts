@@ -5,6 +5,7 @@ import { comparePlanProjections } from './plan-comparison';
 function projection(overrides: Partial<PlanProjection> = {}): PlanProjection {
   return {
     status: 'success',
+    algorithm: 'snowball',
     payoffOrder: ['debt-1', 'debt-2'],
     startMonth: '2026-08',
     debtFreeMonth: '2027-08',
@@ -14,6 +15,7 @@ function projection(overrides: Partial<PlanProjection> = {}): PlanProjection {
     totalPaidMinor: 22_000,
     hasIncompleteInterest: false,
     warnings: [],
+    promotionImpacts: [],
     milestones: [],
     months: [
       {

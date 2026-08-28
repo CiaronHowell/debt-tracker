@@ -34,6 +34,7 @@ async function seedActivePlan(database: DebtTrackerDatabase, suffix: string): Pr
     startingBalanceMinor: 12_000,
     balanceAsOf: '2026-08-28',
     aprBasisPoints: 1_999,
+    promotionalAprEndsOn: null,
     minimumPaymentMinor: 1_000,
     dueDay: 12,
     notes: '',
@@ -87,6 +88,31 @@ describe('BackupService', () => {
     });
     await expect(new PlanService(target).getActiveProjection()).resolves.toMatchObject({
       status: 'success'
+    });
+  });
+
+  it('restores older version-1 backups that omit promotional APR fields', async () => {
+    const source = createDatabase('legacy-source');
+    await seedActivePlan(source, 'legacy');
+    const sourceBackups = new BackupService(source, { now: () => FIXED_NOW });
+    const legacy = structuredClone(await sourceBackups.exportPlain()) as unknown as {
+      payload: {
+        debts: Array<Record<string, unknown>>;
+        scenarios: Array<{ debtSnapshot: Array<Record<string, unknown>> }>;
+      };
+    };
+    delete legacy.payload.debts[0]!.promotionalAprEndsOn;
+    delete legacy.payload.scenarios[0]!.debtSnapshot[0]!.promotionalAprEndsOn;
+
+    const target = createDatabase('legacy-target');
+    const targetBackups = new BackupService(target, { now: () => FIXED_NOW });
+    await targetBackups.importBackup(JSON.stringify(legacy));
+
+    await expect(target.debts.get('debt-legacy')).resolves.toMatchObject({
+      promotionalAprEndsOn: null
+    });
+    await expect(target.scenarios.get('scenario-legacy')).resolves.toMatchObject({
+      debtSnapshot: [expect.objectContaining({ promotionalAprEndsOn: null })]
     });
   });
 

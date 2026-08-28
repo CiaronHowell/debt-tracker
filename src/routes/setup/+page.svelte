@@ -14,8 +14,9 @@
     Trash2,
     WalletCards
   } from '@lucide/svelte';
-  import { calculatePlan, type Currency } from '$lib/domain';
+  import { calculatePlan, type Currency, type PayoffAlgorithm } from '$lib/domain';
   import DebtForm, { type DebtFormSubmission } from '$lib/components/debts/DebtForm.svelte';
+  import PromotionImpactPanel from '$lib/components/plans/PromotionImpactPanel.svelte';
   import { DebtService, PlanService, ScenarioService } from '$lib/application';
   import { getDatabase, getPersistenceMode, type Debt, type PlanSettings } from '$lib/persistence';
   import { currentLocalMonth, formatYearMonth } from '$lib/utils/dates';
@@ -39,6 +40,7 @@
   let editingDebt = $state<Debt | null>(null);
   let pageError = $state('');
   let saving = $state(false);
+  let algorithm = $state<PayoffAlgorithm>('snowball');
 
   let minimumTotal = $derived(debts.reduce((total, debt) => total + debt.minimumPaymentMinor, 0));
   let projection = $derived.by(() => {
@@ -47,11 +49,13 @@
       currency: settings.currency,
       startMonth: settings.startMonth,
       monthlyBudgetMinor: settings.monthlyBudgetMinor,
+      algorithm,
       debts: debts.map((debt) => ({
         debtId: debt.id,
         name: debt.name,
         balanceMinor: debt.currentBalanceMinor,
         aprBasisPoints: debt.aprBasisPoints,
+        promotionalAprEndsOn: debt.promotionalAprEndsOn,
         minimumPaymentMinor: debt.minimumPaymentMinor,
         createdAt: debt.createdAt,
         balanceSource: debt.balanceSource
@@ -117,6 +121,7 @@
         balanceMinor: value.balanceMinor,
         balanceAsOf: value.balanceAsOf,
         aprBasisPoints: value.aprBasisPoints,
+        promotionalAprEndsOn: value.promotionalAprEndsOn,
         minimumPaymentMinor: value.minimumPaymentMinor,
         dueDay: value.dueDay,
         notes: value.notes,
@@ -129,6 +134,7 @@
         startingBalanceMinor: value.balanceMinor,
         balanceAsOf: value.balanceAsOf,
         aprBasisPoints: value.aprBasisPoints,
+        promotionalAprEndsOn: value.promotionalAprEndsOn,
         minimumPaymentMinor: value.minimumPaymentMinor,
         dueDay: value.dueDay,
         notes: value.notes,
@@ -193,7 +199,8 @@
       await scenarioService.createAndActivate({
         name: 'My debt-free plan',
         monthlyBudgetMinor: settings.monthlyBudgetMinor,
-        startMonth: settings.startMonth
+        startMonth: settings.startMonth,
+        algorithm
       });
       await goto(resolve('/'));
     } catch (error) {
@@ -411,7 +418,11 @@
       </div>
       <p class="eyebrow">Step 4 of 4</p>
       <h1>Your debt repayment plan is ready.</h1>
-      <p class="lead">Review how paying your smallest debt first could work for you.</p>
+      <p class="lead">
+        {algorithm === 'deadline-aware'
+          ? 'Review how protecting at-risk 0% offers could work for you.'
+          : 'Review how paying your smallest debt first could work for you.'}
+      </p>
 
       {#if projection?.status === 'success' && settings}
         <div class="review-metrics">
@@ -431,6 +442,15 @@
             >
           </div>
         </div>
+        {#if projection.promotionImpacts.length}
+          <PromotionImpactPanel
+            impacts={projection.promotionImpacts}
+            {currency}
+            {algorithm}
+            disabled={saving}
+            onalgorithmchange={(nextAlgorithm) => (algorithm = nextAlgorithm)}
+          />
+        {/if}
         <div class="payoff-order">
           <h2>Payoff order</h2>
           <ol>
@@ -443,7 +463,20 @@
             {/each}
           </ol>
         </div>
-        {#if projection.hasIncompleteInterest}
+        {@const interestWarnings = projection.warnings.filter(
+          (warning) =>
+            warning.code === 'PROMOTION_EXPIRES_BEFORE_PAYOFF' || warning.code === 'UNKNOWN_APR'
+        )}
+        {#if interestWarnings.length}
+          <div class="warning-note">
+            <strong>Check upcoming interest</strong>
+            <ul>
+              {#each interestWarnings as warning (`${warning.code}-${warning.debtId ?? 'plan'}`)}
+                <li>{warning.message}</li>
+              {/each}
+            </ul>
+          </div>
+        {:else if projection.hasIncompleteInterest}
           <div class="warning-note">
             Interest totals are incomplete because one or more APRs are unknown.
           </div>

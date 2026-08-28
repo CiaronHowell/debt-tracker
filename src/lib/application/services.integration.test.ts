@@ -28,6 +28,7 @@ const debtInput = {
   startingBalanceMinor: 10_000,
   balanceAsOf: '2026-08-28',
   aprBasisPoints: 0,
+  promotionalAprEndsOn: null,
   minimumPaymentMinor: 1_000,
   dueDay: 12,
   notes: '',
@@ -112,6 +113,7 @@ describe('transactional application services', () => {
       balanceMinor: 8_000,
       balanceAsOf: '2026-08-28',
       aprBasisPoints: 0,
+      promotionalAprEndsOn: null,
       minimumPaymentMinor: 1_000,
       dueDay: 15,
       notes: 'Updated locally',
@@ -291,5 +293,58 @@ describe('scenario workspace services', () => {
       activeScenarioId: alternative.id,
       monthlyBudgetMinor: 7_500
     });
+  });
+
+  it('persists promotion terms in snapshots and detects expiry edits as stale', async () => {
+    const database = createDatabase('promotion-staleness');
+    const debtService = new DebtService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('debt-promo', 'snapshot-promo')
+    });
+    const debt = await debtService.create({
+      name: 'Balance transfer',
+      type: 'balance-transfer',
+      startingBalanceMinor: 20_000,
+      balanceAsOf: '2026-08-28',
+      aprBasisPoints: 2_490,
+      promotionalAprEndsOn: '2027-10-15',
+      minimumPaymentMinor: 1_000,
+      dueDay: 15,
+      notes: '',
+      colorKey: null
+    });
+    await new PlanService(database, { now: () => FIXED_NOW }).saveSettings({
+      currency: 'GBP',
+      startMonth: '2026-08',
+      monthlyBudgetMinor: 2_000
+    });
+    const scenarios = new ScenarioService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('scenario-promo')
+    });
+    const scenario = await scenarios.create({
+      name: 'Promotion plan',
+      monthlyBudgetMinor: 2_000,
+      startMonth: '2026-08',
+      algorithm: 'deadline-aware'
+    });
+
+    expect(scenario).toMatchObject({ algorithm: 'deadline-aware' });
+    expect(scenario.debtSnapshot[0]).toMatchObject({
+      promotionalAprEndsOn: '2027-10-15'
+    });
+    await debtService.update(debt.id, {
+      name: debt.name,
+      type: debt.type,
+      balanceMinor: debt.currentBalanceMinor,
+      balanceAsOf: debt.balanceAsOf,
+      aprBasisPoints: debt.aprBasisPoints,
+      promotionalAprEndsOn: '2027-11-15',
+      minimumPaymentMinor: debt.minimumPaymentMinor,
+      dueDay: debt.dueDay,
+      notes: debt.notes,
+      colorKey: debt.colorKey
+    });
+    await expect(scenarios.isStale(scenario.id)).resolves.toBe(true);
   });
 });

@@ -160,6 +160,7 @@
         name: 'Updated payment plan',
         monthlyBudgetMinor: review.scenario.monthlyBudgetMinor,
         startMonth: review.scenario.startMonth,
+        algorithm: review.scenario.algorithm,
         sourceScenarioId: review.scenario.id
       });
       latestPayment = null;

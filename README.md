@@ -2,6 +2,10 @@
 
 A local-first debt snowball planner built with SvelteKit and TypeScript.
 
+## Development disclosure
+
+This project was developed solely through Kiro Crew using GPT-5.6-sol, as a test of Kiro Crew's capabilities.
+
 The implementation contract is documented in [TECHNICAL_SPEC.md](./TECHNICAL_SPEC.md).
 
 ## Development

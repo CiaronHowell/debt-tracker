@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { calculatePlan } from './calculator';
 import type { CalculatePlanInput, ScenarioDebtInput } from './calculator.types';
+import { calculateMonthlyInterest } from './money';
 import { sortDebtInputs } from './ordering';
 
 const debtArrayArbitrary = fc
@@ -30,8 +31,13 @@ describe('calculatePlan properties', () => {
   it('conserves money and never mutates inputs for converging plans', () => {
     fc.assert(
       fc.property(debtArrayArbitrary, (debts) => {
-        const monthlyBudgetMinor =
-          debts.reduce((total, debt) => total + debt.minimumPaymentMinor, 0) + 2_000;
+        const monthlyBudgetMinor = debts.reduce(
+          (total, debt) =>
+            total +
+            debt.minimumPaymentMinor +
+            calculateMonthlyInterest(debt.balanceMinor, debt.aprBasisPoints ?? 0),
+          2_000
+        );
         const calculationInput: CalculatePlanInput = {
           currency: 'GBP',
           startMonth: '2026-01',

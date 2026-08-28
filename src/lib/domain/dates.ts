@@ -68,3 +68,63 @@ export function monthsBetween(start: YearMonth, end: YearMonth): number {
   const endParsed = parseYearMonth(end, 'endMonth');
   return (endParsed.year - startParsed.year) * 12 + (endParsed.month - startParsed.month);
 }
+
+const CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+interface ParsedCalendarDate {
+  year: number;
+  month: number;
+  day: number;
+}
+
+export function daysInCalendarMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leapYear ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+export function parseCalendarDate(value: string, field = 'calendarDate'): ParsedCalendarDate {
+  const match = CALENDAR_DATE_PATTERN.exec(value);
+  if (!match) {
+    throw new DomainError('INVALID_DATE', `${field} must use YYYY-MM-DD format.`, { field, value });
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (
+    year < 1 ||
+    year > 9999 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInCalendarMonth(year, month)
+  ) {
+    throw new DomainError('INVALID_DATE', `${field} contains an invalid calendar date.`, {
+      field,
+      value
+    });
+  }
+
+  return { year, month, day };
+}
+
+export function interestBearingDaysInMonth(
+  month: YearMonth,
+  promotionalAprEndsOn: string
+): {
+  interestBearingDays: number;
+  daysInMonth: number;
+} {
+  const parsedMonth = parseYearMonth(month, 'projectionMonth');
+  const expiry = parseCalendarDate(promotionalAprEndsOn, 'promotionalAprEndsOn');
+  const daysInMonth = daysInCalendarMonth(parsedMonth.year, parsedMonth.month);
+  const monthIndex = parsedMonth.year * 12 + parsedMonth.month;
+  const expiryMonthIndex = expiry.year * 12 + expiry.month;
+
+  if (expiryMonthIndex < monthIndex) return { interestBearingDays: daysInMonth, daysInMonth };
+  if (expiryMonthIndex > monthIndex) return { interestBearingDays: 0, daysInMonth };
+  return { interestBearingDays: daysInMonth - expiry.day, daysInMonth };
+}

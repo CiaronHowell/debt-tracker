@@ -6,16 +6,26 @@ import type {
   MinimumOnlyComparison,
   MonthlyDebtProjection,
   MonthlyProjection,
+  PayoffAlgorithm,
   PlanProjection,
+  PromotionImpact,
   ProjectionWarning,
   ScenarioDebtInput
 } from './calculator.types';
-import { addMonths, parseYearMonth } from './dates';
+import {
+  addMonths,
+  daysInCalendarMonth,
+  interestBearingDaysInMonth,
+  monthsBetween,
+  parseCalendarDate,
+  parseYearMonth
+} from './dates';
 import { DomainError } from './errors';
 import {
   assertAprBasisPoints,
   assertMoneyMinor,
   calculateMonthlyInterest,
+  calculateMonthlyInterestForPeriod,
   capPayment,
   checkedAdd,
   checkedSubtract,
@@ -56,6 +66,16 @@ function validateInput(input: CalculatePlanInput): number {
 
   parseYearMonth(input.startMonth, 'startMonth');
   assertMoneyMinor(input.monthlyBudgetMinor, 'monthlyBudgetMinor');
+
+  if (
+    input.algorithm !== undefined &&
+    input.algorithm !== 'snowball' &&
+    input.algorithm !== 'deadline-aware'
+  ) {
+    throw new DomainError('INVALID_MONEY', 'algorithm must be snowball or deadline-aware.', {
+      algorithm: input.algorithm
+    });
+  }
 
   const maximumMonths = input.maximumMonths ?? DEFAULT_MAXIMUM_MONTHS;
   if (!Number.isSafeInteger(maximumMonths) || maximumMonths < 1 || maximumMonths > 1_200) {
@@ -100,6 +120,10 @@ function validateInput(input: CalculatePlanInput): number {
       assertAprBasisPoints(debt.aprBasisPoints, `${debt.debtId}.aprBasisPoints`);
     }
 
+    if (debt.promotionalAprEndsOn != null) {
+      parseCalendarDate(debt.promotionalAprEndsOn, `${debt.debtId}.promotionalAprEndsOn`);
+    }
+
     if (typeof debt.createdAt !== 'string' || Number.isNaN(Date.parse(debt.createdAt))) {
       throw new DomainError('INVALID_DATE', 'Debt createdAt values must be valid ISO dates.', {
         debtId: debt.debtId,
@@ -135,12 +159,14 @@ function ordersMatch(left: readonly string[], right: readonly string[]): boolean
 
 function buildInitialWarnings(
   orderedDebts: readonly ScenarioDebtInput[],
+  payoffOrder: readonly string[],
+  startMonth: string,
   previousPayoffOrder: readonly string[] | undefined
 ): ProjectionWarning[] {
   const warnings: ProjectionWarning[] = [];
 
   for (const debt of orderedDebts) {
-    if (debt.aprBasisPoints === null) {
+    if (debt.aprBasisPoints === null && !debt.promotionalAprEndsOn) {
       warnings.push({
         code: 'UNKNOWN_APR',
         debtId: debt.debtId,
@@ -156,7 +182,14 @@ function buildInitialWarnings(
       });
     }
 
-    const firstInterest = calculateMonthlyInterest(debt.balanceMinor, debt.aprBasisPoints ?? 0);
+    const firstInterest = debt.promotionalAprEndsOn
+      ? calculateMonthlyInterestForPeriod(
+          debt.balanceMinor,
+          debt.aprBasisPoints ?? 0,
+          startMonth,
+          debt.promotionalAprEndsOn
+        )
+      : calculateMonthlyInterest(debt.balanceMinor, debt.aprBasisPoints ?? 0);
     if (firstInterest >= debt.minimumPaymentMinor) {
       warnings.push({
         code: 'NEGATIVE_AMORTIZATION_AT_MINIMUM',
@@ -170,7 +203,6 @@ function buildInitialWarnings(
     }
   }
 
-  const payoffOrder = orderedDebts.map((debt) => debt.debtId);
   if (previousPayoffOrder && !ordersMatch(previousPayoffOrder, payoffOrder)) {
     warnings.push({
       code: 'PAYOFF_ORDER_CHANGED',
@@ -178,8 +210,47 @@ function buildInitialWarnings(
       details: { previousPayoffOrder: [...previousPayoffOrder], payoffOrder }
     });
   }
-
   return warnings;
+}
+
+function hasPostPromotionExposure(
+  debt: ScenarioDebtInput,
+  months: readonly MonthlyProjection[]
+): boolean {
+  if (!debt.promotionalAprEndsOn) return false;
+  return months.some((month) => {
+    const row = month.debts.find((candidate) => candidate.debtId === debt.debtId);
+    return (
+      Boolean(row && row.openingBalanceMinor > 0) &&
+      interestBearingDaysInMonth(month.month, debt.promotionalAprEndsOn!).interestBearingDays > 0
+    );
+  });
+}
+
+function appendPromotionWarnings(
+  warnings: ProjectionWarning[],
+  debts: readonly ScenarioDebtInput[],
+  months: readonly MonthlyProjection[]
+): void {
+  for (const debt of debts) {
+    if (!debt.promotionalAprEndsOn || !hasPostPromotionExposure(debt, months)) continue;
+
+    warnings.push({
+      code: 'PROMOTION_EXPIRES_BEFORE_PAYOFF',
+      debtId: debt.debtId,
+      message: `${debt.name} is projected to have a balance after its 0% period ends on ${debt.promotionalAprEndsOn}.`,
+      details: { promotionalAprEndsOn: debt.promotionalAprEndsOn }
+    });
+
+    if (debt.aprBasisPoints === null) {
+      warnings.push({
+        code: 'UNKNOWN_APR',
+        debtId: debt.debtId,
+        message: `${debt.name}'s APR after the 0% period is unknown, so interest after ${debt.promotionalAprEndsOn} is not included.`,
+        details: { promotionalAprEndsOn: debt.promotionalAprEndsOn }
+      });
+    }
+  }
 }
 
 function calculateMinimumOnlyComparison(
@@ -200,7 +271,14 @@ function calculateMinimumOnlyComparison(
 
     try {
       for (let monthIndex = 0; monthIndex < maximumMonths; monthIndex += 1) {
-        const interestMinor = calculateMonthlyInterest(balanceMinor, debt.aprBasisPoints ?? 0);
+        const interestMinor = debt.promotionalAprEndsOn
+          ? calculateMonthlyInterestForPeriod(
+              balanceMinor,
+              debt.aprBasisPoints ?? 0,
+              addMonths(startMonth, monthIndex),
+              debt.promotionalAprEndsOn
+            )
+          : calculateMonthlyInterest(balanceMinor, debt.aprBasisPoints ?? 0);
         const balanceAfterInterest = checkedAdd(balanceMinor, interestMinor);
         const paymentMinor = capPayment(debt.minimumPaymentMinor, balanceAfterInterest);
         const closingBalanceMinor = checkedSubtract(balanceAfterInterest, paymentMinor);
@@ -266,26 +344,200 @@ function buildMilestones(
   });
 }
 
+function safePaymentMonths(startMonth: string, promotionalAprEndsOn: string): number {
+  const expiry = parseCalendarDate(promotionalAprEndsOn, 'promotionalAprEndsOn');
+  const expiryMonth = promotionalAprEndsOn.slice(0, 7);
+  const monthsBeforeExpiry = monthsBetween(startMonth, expiryMonth);
+  if (monthsBeforeExpiry < 0) return 0;
+  const includesExpiryMonth = expiry.day === daysInCalendarMonth(expiry.year, expiry.month);
+  return monthsBeforeExpiry + (includesExpiryMonth ? 1 : 0);
+}
+
+function minimumPaymentsLeavePromotionAtRisk(state: DebtState, month: string): boolean {
+  const expiry = state.debt.promotionalAprEndsOn;
+  if (!expiry) return false;
+
+  const paymentMonths = safePaymentMonths(month, expiry);
+  let balanceMinor = state.balanceMinor;
+  for (let monthIndex = 0; monthIndex < paymentMonths; monthIndex += 1) {
+    const projectionMonth = addMonths(month, monthIndex);
+    const interestMinor = calculateMonthlyInterestForPeriod(
+      balanceMinor,
+      state.debt.aprBasisPoints ?? 0,
+      projectionMonth,
+      expiry
+    );
+    const balanceAfterInterest = checkedAdd(balanceMinor, interestMinor);
+    balanceMinor = checkedSubtract(
+      balanceAfterInterest,
+      capPayment(state.debt.minimumPaymentMinor, balanceAfterInterest)
+    );
+    if (balanceMinor === 0) return false;
+  }
+  return balanceMinor > 0;
+}
+
+function deadlineAwarePaymentOrder(
+  activeStates: readonly DebtState[],
+  snowballOrder: readonly string[],
+  month: string,
+  algorithm: PayoffAlgorithm
+): string[] {
+  if (algorithm === 'snowball') {
+    return snowballOrder.filter((debtId) =>
+      activeStates.some((state) => state.debt.debtId === debtId)
+    );
+  }
+
+  const snowballIndex = new Map(snowballOrder.map((debtId, index) => [debtId, index]));
+  const atRisk = activeStates
+    .filter((state) => minimumPaymentsLeavePromotionAtRisk(state, month))
+    .sort((left, right) => {
+      const leftExpiry = left.debt.promotionalAprEndsOn!;
+      const rightExpiry = right.debt.promotionalAprEndsOn!;
+      if (leftExpiry !== rightExpiry) return leftExpiry.localeCompare(rightExpiry);
+      if (left.debt.aprBasisPoints === null && right.debt.aprBasisPoints !== null) return 1;
+      if (left.debt.aprBasisPoints !== null && right.debt.aprBasisPoints === null) return -1;
+      if (left.debt.aprBasisPoints !== right.debt.aprBasisPoints) {
+        return (right.debt.aprBasisPoints ?? 0) - (left.debt.aprBasisPoints ?? 0);
+      }
+      return (
+        (snowballIndex.get(left.debt.debtId) ?? Number.MAX_SAFE_INTEGER) -
+        (snowballIndex.get(right.debt.debtId) ?? Number.MAX_SAFE_INTEGER)
+      );
+    });
+  const priorityIds = new Set(atRisk.map((state) => state.debt.debtId));
+  return [
+    ...atRisk.map((state) => state.debt.debtId),
+    ...snowballOrder.filter(
+      (debtId) =>
+        !priorityIds.has(debtId) && activeStates.some((state) => state.debt.debtId === debtId)
+    )
+  ];
+}
+
+function buildPromotionImpacts(
+  debts: readonly ScenarioDebtInput[],
+  months: readonly MonthlyProjection[],
+  startMonth: string
+): PromotionImpact[] {
+  return debts.flatMap((debt) => {
+    const expiry = debt.promotionalAprEndsOn;
+    if (!expiry) return [];
+
+    const expiryMonth = expiry.slice(0, 7);
+    const expiryDate = parseCalendarDate(expiry, `${debt.debtId}.promotionalAprEndsOn`);
+    const expiryMonthIndex = monthsBetween(startMonth, expiryMonth);
+    const expiryRow =
+      expiryMonthIndex >= 0
+        ? months[expiryMonthIndex]?.debts.find((row) => row.debtId === debt.debtId)
+        : undefined;
+    const expiresAtMonthEnd =
+      expiryDate.day === daysInCalendarMonth(expiryDate.year, expiryDate.month);
+    const balanceAtExpiryMinor =
+      expiryMonthIndex < 0
+        ? debt.balanceMinor
+        : expiryRow
+          ? expiresAtMonthEnd
+            ? expiryRow.closingBalanceMinor
+            : expiryRow.openingBalanceMinor
+          : 0;
+
+    const firstFullMonthIndex = monthsBetween(startMonth, addMonths(expiryMonth, 1));
+    const firstFullMonthRow =
+      firstFullMonthIndex >= 0
+        ? months[firstFullMonthIndex]?.debts.find((row) => row.debtId === debt.debtId)
+        : undefined;
+    const firstFullMonthInterestMinor =
+      debt.aprBasisPoints === null &&
+      (firstFullMonthRow?.openingBalanceMinor ?? balanceAtExpiryMinor) > 0
+        ? null
+        : firstFullMonthRow
+          ? firstFullMonthRow.interestMinor
+          : firstFullMonthIndex < 0
+            ? calculateMonthlyInterest(debt.balanceMinor, debt.aprBasisPoints ?? 0)
+            : 0;
+
+    const paymentMonthsRemaining = safePaymentMonths(startMonth, expiry);
+    const requiredMonthlyPaymentMinor =
+      paymentMonthsRemaining > 0
+        ? Math.ceil(debt.balanceMinor / paymentMonthsRemaining)
+        : debt.balanceMinor;
+    const plannedPaymentTotal = months
+      .slice(0, paymentMonthsRemaining)
+      .reduce(
+        (total, month) =>
+          checkedAdd(
+            total,
+            month.debts.find((row) => row.debtId === debt.debtId)?.paymentMinor ?? 0
+          ),
+        0
+      );
+    const plannedMonthlyPaymentMinor =
+      paymentMonthsRemaining > 0 ? Math.floor(plannedPaymentTotal / paymentMonthsRemaining) : 0;
+
+    return [
+      {
+        debtId: debt.debtId,
+        name: debt.name,
+        promotionalAprEndsOn: expiry,
+        postPromotionAprBasisPoints: debt.aprBasisPoints,
+        atRisk: hasPostPromotionExposure(debt, months),
+        balanceAtExpiryMinor,
+        firstFullMonthInterestMinor,
+        paymentMonthsRemaining,
+        requiredMonthlyPaymentMinor,
+        plannedMonthlyPaymentMinor,
+        monthlyPaymentShortfallMinor: Math.max(
+          0,
+          requiredMonthlyPaymentMinor - plannedMonthlyPaymentMinor
+        )
+      }
+    ];
+  });
+}
+
 function calculateValidatedPlan(
   input: CalculatePlanInput,
   orderedDebts: readonly ScenarioDebtInput[],
   maximumMonths: number
 ): CalculatePlanResult {
-  const payoffOrder = orderedDebts.map((debt) => debt.debtId);
+  const algorithm = input.algorithm ?? 'snowball';
+  const snowballOrder = orderedDebts.map((debt) => debt.debtId);
   const states = new Map<string, DebtState>(
     orderedDebts.map((debt) => [debt.debtId, { debt, balanceMinor: debt.balanceMinor }])
   );
+  const payoffOrder = deadlineAwarePaymentOrder(
+    [...states.values()],
+    snowballOrder,
+    input.startMonth,
+    algorithm
+  );
   const months: MonthlyProjection[] = [];
   const pendingMilestones: PendingMilestone[] = [];
-  const warnings = buildInitialWarnings(orderedDebts, input.previousPayoffOrder);
+  const warnings = buildInitialWarnings(
+    orderedDebts,
+    payoffOrder,
+    input.startMonth,
+    input.previousPayoffOrder
+  );
   let totalInterestMinor = 0;
   let totalPaidMinor = 0;
 
   for (let monthIndex = 0; monthIndex < maximumMonths; monthIndex += 1) {
-    const activeStates = payoffOrder
+    const activeStates = snowballOrder
       .map((debtId) => states.get(debtId))
       .filter((state): state is DebtState => state !== undefined && state.balanceMinor > 0);
-    const targetDebtId = activeStates[0]?.debt.debtId ?? null;
+    const paymentOrder =
+      algorithm === 'snowball'
+        ? activeStates.map((state) => state.debt.debtId)
+        : deadlineAwarePaymentOrder(
+            activeStates,
+            snowballOrder,
+            addMonths(input.startMonth, monthIndex),
+            algorithm
+          );
+    const targetDebtId = paymentOrder[0] ?? null;
     const openingBalances = new Map<string, number>();
     const interestByDebt = new Map<string, number>();
     const balancesAfterInterest = new Map<string, number>();
@@ -295,7 +547,14 @@ function calculateValidatedPlan(
     for (const state of activeStates) {
       const { debt, balanceMinor } = state;
       openingBalances.set(debt.debtId, balanceMinor);
-      const interestMinor = calculateMonthlyInterest(balanceMinor, debt.aprBasisPoints ?? 0);
+      const interestMinor = debt.promotionalAprEndsOn
+        ? calculateMonthlyInterestForPeriod(
+            balanceMinor,
+            debt.aprBasisPoints ?? 0,
+            addMonths(input.startMonth, monthIndex),
+            debt.promotionalAprEndsOn
+          )
+        : calculateMonthlyInterest(balanceMinor, debt.aprBasisPoints ?? 0);
       const balanceAfterInterest = checkedAdd(balanceMinor, interestMinor);
       const requiredPayment = capPayment(debt.minimumPaymentMinor, balanceAfterInterest);
       interestByDebt.set(debt.debtId, interestMinor);
@@ -328,7 +587,7 @@ function calculateValidatedPlan(
     }
 
     let remainingBudget = checkedSubtract(input.monthlyBudgetMinor, totalRequiredPayments);
-    for (const debtId of payoffOrder) {
+    for (const debtId of paymentOrder) {
       if (remainingBudget === 0) break;
       const outstandingBalance = balancesAfterMinimums.get(debtId) ?? 0;
       if (outstandingBalance === 0) continue;
@@ -394,8 +653,16 @@ function calculateValidatedPlan(
         });
       }
 
+      appendPromotionWarnings(warnings, orderedDebts, months);
+      const hasIncompleteInterest = orderedDebts.some(
+        (debt) =>
+          debt.aprBasisPoints === null &&
+          (!debt.promotionalAprEndsOn || hasPostPromotionExposure(debt, months))
+      );
+
       const projection: PlanProjection = {
         status: 'success',
+        algorithm,
         payoffOrder,
         startMonth: input.startMonth,
         debtFreeMonth: addMonths(input.startMonth, monthIndex),
@@ -403,8 +670,9 @@ function calculateValidatedPlan(
         totalStartingBalanceMinor: sumMoney(orderedDebts.map((debt) => debt.balanceMinor)),
         totalInterestMinor,
         totalPaidMinor,
-        hasIncompleteInterest: orderedDebts.some((debt) => debt.aprBasisPoints === null),
+        hasIncompleteInterest,
         warnings,
+        promotionImpacts: buildPromotionImpacts(orderedDebts, months, input.startMonth),
         milestones: buildMilestones(pendingMilestones, months),
         months,
         minimumOnlyComparison: calculateMinimumOnlyComparison(

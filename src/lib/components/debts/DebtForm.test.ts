@@ -43,4 +43,46 @@ describe('DebtForm', () => {
       })
     );
   });
+
+  it('defaults balance transfers to a 0% promotion and submits exact expiry terms', async () => {
+    const onsave = vi.fn().mockResolvedValue(undefined);
+    render(DebtForm, { currency: 'GBP', onsave });
+
+    await fireEvent.change(screen.getByLabelText('Debt type'), {
+      target: { value: 'balance-transfer' }
+    });
+    expect(
+      (
+        screen.getByRole('switch', {
+          name: /Currently on a 0% promotion/
+        }) as HTMLInputElement
+      ).checked
+    ).toBe(true);
+
+    await fireEvent.input(screen.getByLabelText('Debt name'), {
+      target: { value: 'Transfer card' }
+    });
+    await fireEvent.input(screen.getByLabelText(/Current balance/), {
+      target: { value: '2500.00' }
+    });
+    await fireEvent.input(screen.getByLabelText('0% ends'), {
+      target: { value: '2027-10-15' }
+    });
+    await fireEvent.input(screen.getByLabelText(/APR after promotion/), {
+      target: { value: '24.90' }
+    });
+    await fireEvent.input(screen.getByLabelText(/Minimum payment/), {
+      target: { value: '75.00' }
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save debt' }));
+
+    await waitFor(() => expect(onsave).toHaveBeenCalledOnce());
+    expect(onsave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'balance-transfer',
+        promotionalAprEndsOn: '2027-10-15',
+        aprBasisPoints: 2_490
+      })
+    );
+  });
 });

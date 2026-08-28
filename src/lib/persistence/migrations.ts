@@ -1,8 +1,8 @@
 import type Dexie from 'dexie';
 import type { Transaction } from 'dexie';
-import type { AppMeta, Debt } from './models';
+import type { AppMeta, Debt, Scenario } from './models';
 
-export const DATABASE_VERSION = 1;
+export const DATABASE_VERSION = 2;
 export const DATABASE_NAME = 'debt-tracker';
 
 export const LEGACY_SCHEMA = {
@@ -44,7 +44,33 @@ async function migratePreReleaseToV1(transaction: Transaction): Promise<void> {
   });
 }
 
+async function migrateV1ToV2(transaction: Transaction): Promise<void> {
+  await transaction
+    .table<Debt, string>('debts')
+    .toCollection()
+    .modify((debt) => {
+      debt.promotionalAprEndsOn ??= null;
+    });
+
+  await transaction
+    .table<Scenario, string>('scenarios')
+    .toCollection()
+    .modify((scenario) => {
+      scenario.debtSnapshot = scenario.debtSnapshot.map((debt) => ({
+        ...debt,
+        promotionalAprEndsOn: debt.promotionalAprEndsOn ?? null
+      }));
+    });
+
+  await transaction.table<AppMeta, string>('appMeta').put({
+    key: 'schema-version',
+    value: DATABASE_VERSION,
+    updatedAt: new Date().toISOString()
+  });
+}
+
 export function configureMigrations(database: Dexie): void {
   database.version(0.9).stores(LEGACY_SCHEMA);
-  database.version(DATABASE_VERSION).stores(V1_SCHEMA).upgrade(migratePreReleaseToV1);
+  database.version(1).stores(V1_SCHEMA).upgrade(migratePreReleaseToV1);
+  database.version(DATABASE_VERSION).stores(V1_SCHEMA).upgrade(migrateV1ToV2);
 }

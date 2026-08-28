@@ -264,6 +264,123 @@ describe('calculatePlan', () => {
 
     expect(calculationInput).toEqual(original);
   });
+
+  it('uses 0% through the expiry date and prorates the remaining expiry-month days', () => {
+    const projection = expectSuccess(
+      calculatePlan(
+        input(
+          [
+            debt('promo', 10_000, 1_000, 1_200, {
+              promotionalAprEndsOn: '2026-01-15'
+            })
+          ],
+          1_000
+        )
+      )
+    );
+
+    expect(projection.months[0].debts[0]).toMatchObject({
+      openingBalanceMinor: 10_000,
+      interestMinor: 52,
+      closingBalanceMinor: 9_052
+    });
+    expect(projection.months[1].debts[0].interestMinor).toBe(91);
+    expect(projection.warnings).toContainEqual(
+      expect.objectContaining({ code: 'PROMOTION_EXPIRES_BEFORE_PAYOFF', debtId: 'promo' })
+    );
+  });
+
+  it('reports actionable 0% deadline impact figures for the current plan', () => {
+    const projection = expectSuccess(
+      calculatePlan(
+        input(
+          [
+            debt('promo', 2_500, 100, 3_600, {
+              name: 'Transfer card',
+              promotionalAprEndsOn: '2026-03-31'
+            }),
+            debt('small', 1_000, 100)
+          ],
+          1_000
+        )
+      )
+    );
+
+    expect(projection.promotionImpacts).toEqual([
+      {
+        debtId: 'promo',
+        name: 'Transfer card',
+        promotionalAprEndsOn: '2026-03-31',
+        postPromotionAprBasisPoints: 3_600,
+        atRisk: true,
+        balanceAtExpiryMinor: 500,
+        firstFullMonthInterestMinor: 15,
+        paymentMonthsRemaining: 3,
+        requiredMonthlyPaymentMinor: 834,
+        plannedMonthlyPaymentMinor: 666,
+        monthlyPaymentShortfallMinor: 168
+      }
+    ]);
+  });
+
+  it('opts into deadline-aware extra payments without changing minimum payments', () => {
+    const debts = [
+      debt('promo', 2_500, 100, 3_600, { promotionalAprEndsOn: '2026-03-31' }),
+      debt('small', 1_000, 100)
+    ];
+    const snowball = expectSuccess(calculatePlan(input(debts, 1_000)));
+    const protectedPlan = expectSuccess(
+      calculatePlan(input(debts, 1_000, { algorithm: 'deadline-aware' }))
+    );
+
+    expect(snowball.months[0].targetDebtId).toBe('small');
+    expect(protectedPlan).toMatchObject({
+      algorithm: 'deadline-aware',
+      payoffOrder: ['promo', 'small']
+    });
+    expect(protectedPlan.months[0].targetDebtId).toBe('promo');
+    expect(protectedPlan.months[0].debts.find((row) => row.debtId === 'small')).toMatchObject({
+      requiredPaymentMinor: 100,
+      paymentMinor: 100
+    });
+    expect(protectedPlan.promotionImpacts[0]).toMatchObject({
+      atRisk: false,
+      balanceAtExpiryMinor: 0,
+      firstFullMonthInterestMinor: 0
+    });
+    expect(protectedPlan.totalInterestMinor).toBeLessThan(snowball.totalInterestMinor);
+  });
+
+  it('warns about an unknown post-promotion APR only when the plan crosses expiry', () => {
+    const paidDuringPromotion = expectSuccess(
+      calculatePlan(
+        input([debt('paid-early', 100, 100, null, { promotionalAprEndsOn: '2026-12-31' })], 100)
+      )
+    );
+    expect(paidDuringPromotion.hasIncompleteInterest).toBe(false);
+    expect(paidDuringPromotion.warnings).not.toContainEqual(
+      expect.objectContaining({ code: 'UNKNOWN_APR' })
+    );
+
+    const crossesExpiry = expectSuccess(
+      calculatePlan(
+        input(
+          [debt('unknown-after', 1_000, 100, null, { promotionalAprEndsOn: '2026-01-15' })],
+          100
+        )
+      )
+    );
+    expect(crossesExpiry.hasIncompleteInterest).toBe(true);
+    expect(crossesExpiry.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'PROMOTION_EXPIRES_BEFORE_PAYOFF',
+          debtId: 'unknown-after'
+        }),
+        expect.objectContaining({ code: 'UNKNOWN_APR', debtId: 'unknown-after' })
+      ])
+    );
+  });
 });
 
 describe('projection metadata', () => {

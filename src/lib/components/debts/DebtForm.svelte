@@ -2,7 +2,7 @@
   import { Save, X } from '@lucide/svelte';
   import type { Currency } from '$lib/domain';
   import type { Debt, DebtType } from '$lib/persistence';
-  import { currentLocalDate } from '$lib/utils/dates';
+  import { currentLocalDate, formatCalendarDate } from '$lib/utils/dates';
   import {
     currencySymbol,
     formatMoneyInput,
@@ -16,6 +16,7 @@
     balanceMinor: number;
     balanceAsOf: string;
     aprBasisPoints: number | null;
+    promotionalAprEndsOn: string | null;
     minimumPaymentMinor: number;
     dueDay: number | null;
     notes: string;
@@ -38,6 +39,8 @@
       balance: value ? formatMoneyInput(value.currentBalanceMinor) : '',
       balanceAsOf: value?.balanceAsOf ?? currentLocalDate(),
       apr: value?.aprBasisPoints == null ? '' : formatMoneyInput(value.aprBasisPoints),
+      promotionalAprEndsOn: value?.promotionalAprEndsOn ?? '',
+      promotional: value?.promotionalAprEndsOn != null,
       minimumPayment: value ? formatMoneyInput(value.minimumPaymentMinor) : '',
       dueDay: value?.dueDay == null ? '' : String(value.dueDay),
       notes: value?.notes ?? ''
@@ -52,6 +55,8 @@
   let balance = $state(initial.balance);
   let balanceAsOf = $state(initial.balanceAsOf);
   let apr = $state(initial.apr);
+  let promotional = $state(initial.promotional);
+  let promotionalAprEndsOn = $state(initial.promotionalAprEndsOn);
   let minimumPayment = $state(initial.minimumPayment);
   let dueDay = $state(initial.dueDay);
   let notes = $state(initial.notes);
@@ -59,12 +64,29 @@
   let submitError = $state('');
   let saving = $state(false);
 
+  function supportsPromotion(value: DebtType = type): boolean {
+    return value === 'credit-card' || value === 'balance-transfer';
+  }
+
+  function changeType(event: Event): void {
+    const nextType = (event.currentTarget as HTMLSelectElement).value as DebtType;
+    const previousType = type;
+    type = nextType;
+    if (nextType === 'balance-transfer' && previousType !== 'balance-transfer') {
+      promotional = true;
+    } else if (!supportsPromotion(nextType)) {
+      promotional = false;
+    }
+  }
+
   function validate(): DebtFormSubmission | null {
     const nextErrors: Record<string, string> = {};
     const trimmedName = name.trim();
     const balanceMinor = parseMoneyInput(balance);
     const minimumPaymentMinor = parseMoneyInput(minimumPayment);
     const aprBasisPoints = apr.trim() === '' ? null : parseAprInput(apr);
+    const promotionEnabled = promotional && supportsPromotion();
+    const promotionEndDate = promotionEnabled ? promotionalAprEndsOn : null;
     const dueDayValue = String(dueDay).trim();
     const parsedDueDay = dueDayValue === '' ? null : Number(dueDayValue);
 
@@ -77,6 +99,9 @@
     if (!balanceAsOf) nextErrors.balanceAsOf = 'Choose the date this balance was recorded.';
     if (apr.trim() !== '' && aprBasisPoints === null) {
       nextErrors.apr = 'Enter an APR from 0 to 1,000 with up to two decimal places.';
+    }
+    if (promotionEnabled && !promotionEndDate) {
+      nextErrors.promotionalAprEndsOn = 'Choose the date the 0% promotion ends.';
     }
     if (minimumPaymentMinor === null || minimumPaymentMinor <= 0) {
       nextErrors.minimumPayment =
@@ -101,6 +126,7 @@
       balanceMinor,
       balanceAsOf,
       aprBasisPoints,
+      promotionalAprEndsOn: promotionEndDate,
       minimumPaymentMinor,
       dueDay: parsedDueDay,
       notes,
@@ -143,8 +169,9 @@
 
     <div class="field-group">
       <label for="debt-type">Debt type</label>
-      <select id="debt-type" name="type" bind:value={type}>
+      <select id="debt-type" name="type" value={type} onchange={changeType}>
         <option value="credit-card">Credit card</option>
+        <option value="balance-transfer">Balance transfer</option>
         <option value="loan">Loan</option>
         <option value="overdraft">Overdraft</option>
         <option value="other">Other</option>
@@ -185,57 +212,163 @@
     </div>
   </div>
 
-  <div class="form-grid three-columns">
-    <div class="field-group">
-      <label for="debt-apr">APR (%) <span class="optional">Optional</span></label>
-      <input
-        id="debt-apr"
-        name="apr"
-        type="text"
-        inputmode="decimal"
-        placeholder="19.99"
-        bind:value={apr}
-        aria-invalid={errors.apr ? 'true' : undefined}
-        aria-describedby={errors.apr ? 'debt-apr-error' : 'debt-apr-hint'}
-      />
-      <p class="field-hint" id="debt-apr-hint">Leave blank if you do not know it.</p>
-      {#if errors.apr}<p class="field-error" id="debt-apr-error">{errors.apr}</p>{/if}
-    </div>
+  {#if supportsPromotion()}
+    <div class="promotion-card">
+      <label class="promotion-toggle" for="zero-percent-promotion">
+        <span>
+          <strong>Currently on a 0% promotion</strong>
+          <small>Interest starts after the promotion expiry date.</small>
+        </span>
+        <input
+          id="zero-percent-promotion"
+          name="promotional"
+          type="checkbox"
+          role="switch"
+          bind:checked={promotional}
+        />
+      </label>
 
-    <div class="field-group">
-      <label for="minimum-payment">Minimum payment ({currencySymbol(currency)})</label>
-      <input
-        id="minimum-payment"
-        name="minimumPayment"
-        type="text"
-        inputmode="decimal"
-        placeholder="0.00"
-        bind:value={minimumPayment}
-        aria-invalid={errors.minimumPayment ? 'true' : undefined}
-        aria-describedby={errors.minimumPayment ? 'minimum-payment-error' : undefined}
-      />
-      {#if errors.minimumPayment}
-        <p class="field-error" id="minimum-payment-error">{errors.minimumPayment}</p>
+      {#if promotional}
+        <div class="form-grid two-columns promotion-fields">
+          <div class="field-group">
+            <label for="promotion-end-date">0% ends</label>
+            <input
+              id="promotion-end-date"
+              name="promotionalAprEndsOn"
+              type="date"
+              bind:value={promotionalAprEndsOn}
+              aria-invalid={errors.promotionalAprEndsOn ? 'true' : undefined}
+              aria-describedby={errors.promotionalAprEndsOn
+                ? 'promotion-end-date-error'
+                : undefined}
+            />
+            {#if errors.promotionalAprEndsOn}
+              <p class="field-error" id="promotion-end-date-error">
+                {errors.promotionalAprEndsOn}
+              </p>
+            {/if}
+          </div>
+
+          <div class="field-group">
+            <label for="debt-apr"
+              >APR after promotion (%) <span class="optional">Optional</span></label
+            >
+            <input
+              id="debt-apr"
+              name="apr"
+              type="text"
+              inputmode="decimal"
+              placeholder="19.99"
+              bind:value={apr}
+              aria-invalid={errors.apr ? 'true' : undefined}
+              aria-describedby={errors.apr ? 'debt-apr-error' : 'debt-apr-hint'}
+            />
+            <p class="field-hint" id="debt-apr-hint">Leave blank if you do not know it.</p>
+            {#if errors.apr}<p class="field-error" id="debt-apr-error">{errors.apr}</p>{/if}
+          </div>
+        </div>
+        <p class="promotion-summary">
+          {#if promotionalAprEndsOn}
+            We'll use 0% through {formatCalendarDate(promotionalAprEndsOn)}, then {apr.trim()
+              ? `${apr.trim()}% APR`
+              : 'the APR you add later'}.
+          {:else}
+            Add the expiry date so the plan knows when interest starts.
+          {/if}
+        </p>
       {/if}
     </div>
+  {/if}
 
-    <div class="field-group">
-      <label for="due-day">Due day <span class="optional">Optional</span></label>
-      <input
-        id="due-day"
-        name="dueDay"
-        type="number"
-        inputmode="numeric"
-        min="1"
-        max="31"
-        placeholder="15"
-        bind:value={dueDay}
-        aria-invalid={errors.dueDay ? 'true' : undefined}
-        aria-describedby={errors.dueDay ? 'due-day-error' : undefined}
-      />
-      {#if errors.dueDay}<p class="field-error" id="due-day-error">{errors.dueDay}</p>{/if}
+  {#if !promotional || !supportsPromotion()}
+    <div class="form-grid three-columns">
+      <div class="field-group">
+        <label for="debt-apr">APR (%) <span class="optional">Optional</span></label>
+        <input
+          id="debt-apr"
+          name="apr"
+          type="text"
+          inputmode="decimal"
+          placeholder="19.99"
+          bind:value={apr}
+          aria-invalid={errors.apr ? 'true' : undefined}
+          aria-describedby={errors.apr ? 'debt-apr-error' : 'debt-apr-hint'}
+        />
+        <p class="field-hint" id="debt-apr-hint">Leave blank if you do not know it.</p>
+        {#if errors.apr}<p class="field-error" id="debt-apr-error">{errors.apr}</p>{/if}
+      </div>
+
+      <div class="field-group">
+        <label for="minimum-payment">Minimum payment ({currencySymbol(currency)})</label>
+        <input
+          id="minimum-payment"
+          name="minimumPayment"
+          type="text"
+          inputmode="decimal"
+          placeholder="0.00"
+          bind:value={minimumPayment}
+          aria-invalid={errors.minimumPayment ? 'true' : undefined}
+          aria-describedby={errors.minimumPayment ? 'minimum-payment-error' : undefined}
+        />
+        {#if errors.minimumPayment}
+          <p class="field-error" id="minimum-payment-error">{errors.minimumPayment}</p>
+        {/if}
+      </div>
+
+      <div class="field-group">
+        <label for="due-day">Due day <span class="optional">Optional</span></label>
+        <input
+          id="due-day"
+          name="dueDay"
+          type="number"
+          inputmode="numeric"
+          min="1"
+          max="31"
+          placeholder="15"
+          bind:value={dueDay}
+          aria-invalid={errors.dueDay ? 'true' : undefined}
+          aria-describedby={errors.dueDay ? 'due-day-error' : undefined}
+        />
+        {#if errors.dueDay}<p class="field-error" id="due-day-error">{errors.dueDay}</p>{/if}
+      </div>
     </div>
-  </div>
+  {:else}
+    <div class="form-grid two-columns">
+      <div class="field-group">
+        <label for="minimum-payment">Minimum payment ({currencySymbol(currency)})</label>
+        <input
+          id="minimum-payment"
+          name="minimumPayment"
+          type="text"
+          inputmode="decimal"
+          placeholder="0.00"
+          bind:value={minimumPayment}
+          aria-invalid={errors.minimumPayment ? 'true' : undefined}
+          aria-describedby={errors.minimumPayment ? 'minimum-payment-error' : undefined}
+        />
+        {#if errors.minimumPayment}
+          <p class="field-error" id="minimum-payment-error">{errors.minimumPayment}</p>
+        {/if}
+      </div>
+
+      <div class="field-group">
+        <label for="due-day">Due day <span class="optional">Optional</span></label>
+        <input
+          id="due-day"
+          name="dueDay"
+          type="number"
+          inputmode="numeric"
+          min="1"
+          max="31"
+          placeholder="15"
+          bind:value={dueDay}
+          aria-invalid={errors.dueDay ? 'true' : undefined}
+          aria-describedby={errors.dueDay ? 'due-day-error' : undefined}
+        />
+        {#if errors.dueDay}<p class="field-error" id="due-day-error">{errors.dueDay}</p>{/if}
+      </div>
+    </div>
+  {/if}
 
   <div class="field-group">
     <label for="debt-notes">Notes <span class="optional">Optional</span></label>

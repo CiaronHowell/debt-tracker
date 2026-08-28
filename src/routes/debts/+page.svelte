@@ -12,6 +12,7 @@
   import DebtForm, { type DebtFormSubmission } from '$lib/components/debts/DebtForm.svelte';
   import { DebtService, PlanService } from '$lib/application';
   import { getDatabase, type Debt } from '$lib/persistence';
+  import { formatCalendarDate } from '$lib/utils/dates';
   import { formatMoney } from '$lib/utils/money';
   import type { Currency } from '$lib/domain';
 
@@ -78,6 +79,7 @@
         balanceMinor: value.balanceMinor,
         balanceAsOf: value.balanceAsOf,
         aprBasisPoints: value.aprBasisPoints,
+        promotionalAprEndsOn: value.promotionalAprEndsOn,
         minimumPaymentMinor: value.minimumPaymentMinor,
         dueDay: value.dueDay,
         notes: value.notes,
@@ -90,6 +92,7 @@
         startingBalanceMinor: value.balanceMinor,
         balanceAsOf: value.balanceAsOf,
         aprBasisPoints: value.aprBasisPoints,
+        promotionalAprEndsOn: value.promotionalAprEndsOn,
         minimumPaymentMinor: value.minimumPaymentMinor,
         dueDay: value.dueDay,
         notes: value.notes,
@@ -112,8 +115,16 @@
     }
   }
 
-  function formatApr(aprBasisPoints: number | null): string {
-    return aprBasisPoints === null ? 'APR unknown' : `${(aprBasisPoints / 100).toFixed(2)}% APR`;
+  function formatApr(debt: Debt): string {
+    const apr =
+      debt.aprBasisPoints === null
+        ? 'APR unknown after promotion'
+        : `${(debt.aprBasisPoints / 100).toFixed(2)}% APR after promotion`;
+    return debt.promotionalAprEndsOn
+      ? `0% through ${formatCalendarDate(debt.promotionalAprEndsOn)} · ${apr}`
+      : debt.aprBasisPoints === null
+        ? 'APR unknown'
+        : `${(debt.aprBasisPoints / 100).toFixed(2)}% APR`;
   }
 </script>
 
@@ -191,7 +202,7 @@
             <div class="debt-primary">
               <span class="debt-type">{debt.type.replace('-', ' ')}</span>
               <h2>{debt.name}</h2>
-              <span class="debt-meta">{formatApr(debt.aprBasisPoints)}</span>
+              <span class="debt-meta">{formatApr(debt)}</span>
             </div>
             <div class="debt-amount">
               <span>Balance</span>

@@ -1,4 +1,5 @@
-import type { AprBasisPoints, MoneyMinor } from './calculator.types';
+import type { AprBasisPoints, MoneyMinor, YearMonth } from './calculator.types';
+import { interestBearingDaysInMonth } from './dates';
 import { DomainError } from './errors';
 
 export const MIN_MONEY_MINOR = 0;
@@ -162,4 +163,28 @@ export function capPayment(requested: MoneyMinor, balanceMinor: MoneyMinor): Mon
     });
   }
   return Math.min(requested, balanceMinor);
+}
+
+export function calculateMonthlyInterestForPeriod(
+  balanceMinor: MoneyMinor,
+  aprBasisPoints: AprBasisPoints,
+  month: YearMonth,
+  promotionalAprEndsOn?: string | null
+): MoneyMinor {
+  if (!promotionalAprEndsOn) return calculateMonthlyInterest(balanceMinor, aprBasisPoints);
+
+  const { interestBearingDays, daysInMonth } = interestBearingDaysInMonth(
+    month,
+    promotionalAprEndsOn
+  );
+  if (interestBearingDays === 0) return 0;
+  if (interestBearingDays === daysInMonth) {
+    return calculateMonthlyInterest(balanceMinor, aprBasisPoints);
+  }
+
+  assertMoneyMinor(balanceMinor, 'balanceMinor', Number.MAX_SAFE_INTEGER);
+  assertAprBasisPoints(aprBasisPoints);
+  const balanceAndApr = checkedMultiply(balanceMinor, aprBasisPoints);
+  const numerator = checkedMultiply(balanceAndApr, interestBearingDays);
+  return roundHalfUpRatio(numerator, MONTHLY_INTEREST_DENOMINATOR * daysInMonth);
 }

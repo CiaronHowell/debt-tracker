@@ -39,6 +39,7 @@ function debtToScenarioInput(debt: Debt): ScenarioDebtInput {
     name: debt.name,
     balanceMinor: debt.currentBalanceMinor,
     aprBasisPoints: debt.aprBasisPoints,
+    promotionalAprEndsOn: debt.promotionalAprEndsOn,
     minimumPaymentMinor: debt.minimumPaymentMinor,
     createdAt: debt.createdAt,
     balanceSource: debt.balanceSource
@@ -53,6 +54,7 @@ export function calculateScenarioProjection(
     currency: settings.currency,
     startMonth: scenario.startMonth,
     monthlyBudgetMinor: scenario.monthlyBudgetMinor,
+    algorithm: scenario.algorithm,
     debts: scenario.debtSnapshot
   });
 
@@ -153,6 +155,7 @@ export class PlanService {
       currency: settings.currency,
       startMonth: scenario.startMonth,
       monthlyBudgetMinor: scenario.monthlyBudgetMinor,
+      algorithm: scenario.algorithm,
       debts: currentDebts,
       previousPayoffOrder: activeProjection.payoffOrder
     });

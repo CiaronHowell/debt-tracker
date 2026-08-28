@@ -12,6 +12,7 @@ const debt: Debt = {
   balanceAsOf: '2026-08-28',
   balanceSource: 'estimated',
   aprBasisPoints: 0,
+  promotionalAprEndsOn: null,
   minimumPaymentMinor: 2_500,
   dueDay: 15,
   notes: '',

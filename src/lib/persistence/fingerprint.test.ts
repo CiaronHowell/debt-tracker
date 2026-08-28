@@ -45,4 +45,13 @@ describe('scenario fingerprints', () => {
       await scenarioFingerprint([{ ...first, aprBasisPoints: 0 }])
     );
   });
+
+  it('includes promotional APR expiry while normalizing omitted terms to no promotion', async () => {
+    await expect(scenarioFingerprint([first])).resolves.toBe(
+      await scenarioFingerprint([{ ...first, promotionalAprEndsOn: null }])
+    );
+    await expect(scenarioFingerprint([first])).resolves.not.toBe(
+      await scenarioFingerprint([{ ...first, promotionalAprEndsOn: '2027-10-15' }])
+    );
+  });
 });

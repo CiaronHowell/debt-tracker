@@ -11,14 +11,30 @@ export type {
   MoneyMinor,
   MonthlyDebtProjection,
   MonthlyProjection,
+  PayoffAlgorithm,
   PlanProjection,
+  PromotionImpact,
   ProjectionWarning,
   ProjectionWarningCode,
   ScenarioDebtInput,
   SignedMoneyMinor,
   YearMonth
 } from './calculator.types';
-export { addMonths, compareYearMonths, isYearMonth, monthsBetween, parseYearMonth } from './dates';
+export {
+  addMonths,
+  compareYearMonths,
+  daysInCalendarMonth,
+  interestBearingDaysInMonth,
+  isYearMonth,
+  monthsBetween,
+  parseCalendarDate,
+  parseYearMonth
+} from './dates';
 export { DomainError, type DomainErrorCode } from './errors';
-export { MAX_APR_BASIS_POINTS, MAX_INPUT_MONEY_MINOR, calculateMonthlyInterest } from './money';
+export {
+  MAX_APR_BASIS_POINTS,
+  MAX_INPUT_MONEY_MINOR,
+  calculateMonthlyInterest,
+  calculateMonthlyInterestForPeriod
+} from './money';
 export { compareDebtInputs, sortDebtInputs } from './ordering';

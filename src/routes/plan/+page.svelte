@@ -21,6 +21,7 @@
     Target,
     X
   } from '@lucide/svelte';
+  import PromotionImpactPanel from '$lib/components/plans/PromotionImpactPanel.svelte';
   import {
     PlanService,
     ScenarioService,
@@ -31,7 +32,7 @@
     paginateRows,
     type SavedScenarioView
   } from '$lib/application';
-  import type { CalculationFailure, Currency, PlanProjection } from '$lib/domain';
+  import type { CalculationFailure, Currency, PayoffAlgorithm, PlanProjection } from '$lib/domain';
   import { getDatabase, getPersistenceMode, type PlanSettings } from '$lib/persistence';
   import { formatYearMonth } from '$lib/utils/dates';
   import { formatMoney, formatMoneyInput, parseMoneyInput } from '$lib/utils/money';
@@ -59,6 +60,7 @@
   let scenarioName = $state('Alternative plan');
   let draftProjection = $state<PlanProjection | null>(null);
   let draftFailure = $state<CalculationFailure | null>(null);
+  let draftAlgorithm = $state<PayoffAlgorithm>('snowball');
   let renaming = $state(false);
   let renameInput = $state('');
   let activationMode = $state<ActivationMode | null>(null);
@@ -67,6 +69,12 @@
 
   let selected = $derived(plans.find((plan) => plan.scenario.id === selectedId) ?? null);
   let selectedProjection = $derived(selected?.projection ?? null);
+  let interestWarnings = $derived(
+    draftProjection?.warnings.filter(
+      (warning) =>
+        warning.code === 'PROMOTION_EXPIRES_BEFORE_PAYOFF' || warning.code === 'UNKNOWN_APR'
+    ) ?? []
+  );
   let currency = $derived<Currency>(settings?.currency ?? 'GBP');
   let activeScenarioId = $derived(settings?.activeScenarioId ?? null);
   let minimumBudgetMinor = $derived(minimumPaymentTotal(selected?.scenario.debtSnapshot ?? []));
@@ -97,6 +105,7 @@
     budgetInput = formatMoneyInput(budget);
     extraInput = formatMoneyInput(extraPaymentForBudget(budget, minimums));
     scenarioName = `${plan.scenario.name} alternative`;
+    draftAlgorithm = plan.scenario.algorithm;
     draftProjection = plan.projection;
     draftFailure = null;
   }
@@ -161,7 +170,8 @@
     try {
       const result = await scenarioService.preview({
         monthlyBudgetMinor: budgetMinor,
-        startMonth: selected.scenario.startMonth
+        startMonth: selected.scenario.startMonth,
+        algorithm: draftAlgorithm
       });
       if (result.status === 'success') {
         draftProjection = result;
@@ -208,6 +218,13 @@
     updateExtra(formatMoneyInput(current + amountMinor));
   }
 
+  function updateAlgorithm(algorithm: PayoffAlgorithm): void {
+    draftAlgorithm = algorithm;
+    if (debounceHandle) clearTimeout(debounceHandle);
+    const budgetMinor = parseMoneyInput(budgetInput);
+    if (budgetMinor !== null && budgetMinor > 0) void recalculateDraft(budgetMinor);
+  }
+
   async function runAction(action: () => Promise<void>): Promise<void> {
     saving = true;
     pageError = '';
@@ -233,6 +250,7 @@
         name,
         monthlyBudgetMinor: parseMoneyInput(budgetInput)!,
         startMonth: selected.scenario.startMonth,
+        algorithm: draftAlgorithm,
         sourceScenarioId: selected.scenario.id
       });
       await loadWorkspace(scenario.id);
@@ -283,6 +301,7 @@
               name: scenarioName.trim() || 'Alternative plan',
               monthlyBudgetMinor: parseMoneyInput(budgetInput)!,
               startMonth: selected.scenario.startMonth,
+              algorithm: draftAlgorithm,
               sourceScenarioId: selected.scenario.id
             });
       activationMode = null;
@@ -467,6 +486,30 @@
             >
           </article>
         </section>
+
+        {#if draftProjection?.promotionImpacts.length}
+          <PromotionImpactPanel
+            impacts={draftProjection.promotionImpacts}
+            {currency}
+            algorithm={draftAlgorithm}
+            disabled={saving || calculating || selected.isStale}
+            onalgorithmchange={updateAlgorithm}
+          />
+        {/if}
+
+        {#if interestWarnings.length}
+          <section class="projection-warning-list" aria-labelledby="interest-warning-title">
+            <AlertTriangle size={21} aria-hidden="true" />
+            <div>
+              <h2 id="interest-warning-title">Check upcoming interest</h2>
+              <ul>
+                {#each interestWarnings as warning (`${warning.code}-${warning.debtId ?? 'plan'}`)}
+                  <li>{warning.message}</li>
+                {/each}
+              </ul>
+            </div>
+          </section>
+        {/if}
 
         <section class="payoff-timeline" aria-labelledby="timeline-title">
           <div class="workspace-section-heading">

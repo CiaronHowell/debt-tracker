@@ -4,6 +4,7 @@ import {
   assertAprBasisPoints,
   assertMoneyMinor,
   calculateMonthlyInterest,
+  calculateMonthlyInterestForPeriod,
   capPayment,
   checkedAdd,
   checkedMultiply,
@@ -36,6 +37,13 @@ describe('money primitives', () => {
     expect(calculateMonthlyInterest(10_000, 1_200)).toBe(100);
     expect(calculateMonthlyInterest(50, 1_200)).toBe(1);
     expect(calculateMonthlyInterest(10_000, 0)).toBe(0);
+  });
+
+  it('prorates only the interest-bearing days after a 0% promotion expires', () => {
+    expect(calculateMonthlyInterestForPeriod(10_000, 1_200, '2027-09', '2027-10-15')).toBe(0);
+    expect(calculateMonthlyInterestForPeriod(10_000, 1_200, '2027-10', '2027-10-15')).toBe(52);
+    expect(calculateMonthlyInterestForPeriod(10_000, 1_200, '2027-11', '2027-10-15')).toBe(100);
+    expect(calculateMonthlyInterestForPeriod(10_000, 1_200, '2027-10', '2027-10-31')).toBe(0);
   });
 
   it('checks addition, subtraction, payment capping, and overflow', () => {

@@ -5,6 +5,7 @@ interface CanonicalDebtInput {
   name: string;
   balanceMinor: number;
   aprBasisPoints: number | null;
+  promotionalAprEndsOn: string | null;
   minimumPaymentMinor: number;
   createdAt: string;
   balanceSource: 'user' | 'estimated';
@@ -23,6 +24,7 @@ export function canonicalizeScenarioDebts(debts: ScenarioDebtInput[]): string {
       name: debt.name,
       balanceMinor: debt.balanceMinor,
       aprBasisPoints: debt.aprBasisPoints,
+      promotionalAprEndsOn: debt.promotionalAprEndsOn ?? null,
       minimumPaymentMinor: debt.minimumPaymentMinor,
       createdAt: debt.createdAt,
       balanceSource: debt.balanceSource ?? 'user'

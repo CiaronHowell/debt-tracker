@@ -1003,6 +1003,65 @@ main {
   gap: 1rem;
 }
 
+.promotion-card {
+  display: grid;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.promotion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+}
+
+.promotion-toggle span,
+.promotion-toggle strong,
+.promotion-toggle small {
+  display: block;
+}
+
+.promotion-toggle strong {
+  margin-bottom: 0.2rem;
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
+.promotion-toggle small {
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.promotion-toggle input {
+  width: 2.7rem;
+  height: 1.5rem;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.promotion-fields {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.promotion-summary {
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
 .field-group {
   display: grid;
   align-content: start;
@@ -1976,6 +2035,33 @@ main {
   grid-column: 1 / -1;
 }
 
+.projection-warning-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.8rem;
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.projection-warning-list h2 {
+  margin-bottom: 0.35rem;
+  font-size: 0.94rem;
+}
+
+.projection-warning-list ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 .plan-summary-grid {
   display: grid;
   gap: 0.65rem;
@@ -2656,5 +2742,197 @@ main {
 
   .settings-privacy {
     flex-wrap: wrap;
+  }
+}
+
+/* Promotional deadline impact and opt-in strategy */
+.promotion-impact-panel {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1rem, 3vw, 1.4rem);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.promotion-impact-heading,
+.promotion-impact-title-row,
+.deadline-strategy-control {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.promotion-impact-heading h2,
+.promotion-impact-heading p,
+.promotion-impact-card h3,
+.promotion-impact-card p,
+.promotion-impact-note {
+  margin-bottom: 0;
+}
+
+.promotion-impact-heading > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.promotion-impact-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.promotion-impact-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.promotion-impact-card.at-risk {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  background: color-mix(in srgb, var(--warning-soft) 38%, var(--surface));
+}
+
+.promotion-impact-card h3 {
+  font-size: 0.95rem;
+}
+
+.promotion-impact-card p {
+  max-width: 47rem;
+  margin-top: 0.35rem;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.promotion-impact-status {
+  display: inline-flex;
+  min-height: 1.8rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 0.68rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.promotion-impact-status.clear {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.promotion-impact-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.promotion-impact-metrics > div {
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.promotion-impact-metrics dt,
+.promotion-impact-metrics dd {
+  margin: 0;
+}
+
+.promotion-impact-metrics dt {
+  margin-bottom: 0.25rem;
+  color: var(--text-soft);
+  font-size: 0.7rem;
+}
+
+.promotion-impact-metrics dd {
+  font-size: 0.9rem;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+
+.promotion-impact-metrics dd.warning {
+  color: var(--warning);
+}
+
+.deadline-strategy-control {
+  align-items: center;
+  padding: 0.9rem;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.deadline-strategy-control strong,
+.deadline-strategy-control span {
+  display: block;
+}
+
+.deadline-strategy-control strong {
+  margin-bottom: 0.2rem;
+  font-size: 0.86rem;
+}
+
+.deadline-strategy-control div > span {
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.strategy-switch {
+  position: relative;
+  width: 2.85rem;
+  height: 1.6rem;
+  flex: 0 0 auto;
+  padding: 0.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.strategy-switch > span {
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform 120ms ease;
+}
+
+.strategy-switch[aria-checked='true'] {
+  background: var(--accent);
+}
+
+.strategy-switch[aria-checked='true'] > span {
+  transform: translateX(1.25rem);
+}
+
+.strategy-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.promotion-impact-note {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 39.999rem) {
+  .promotion-impact-title-row {
+    flex-direction: column;
+  }
+
+  .promotion-impact-metrics {
+    grid-template-columns: 1fr;
   }
 }

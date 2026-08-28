@@ -18,8 +18,9 @@ import { validateInput } from './validation';
 
 const editableDebtFields = {
   name: z.string().trim().min(1).max(80),
-  type: z.enum(['credit-card', 'loan', 'overdraft', 'other']),
+  type: z.enum(['credit-card', 'balance-transfer', 'loan', 'overdraft', 'other']),
   aprBasisPoints: aprBasisPointsSchema.nullable(),
+  promotionalAprEndsOn: calendarDateSchema.nullable(),
   minimumPaymentMinor: positiveMoneyMinorSchema,
   dueDay: z.number().int().min(1).max(31).nullable(),
   notes: z.string().max(2_000),
@@ -44,8 +45,8 @@ const reconcileBalanceInputSchema = z.strictObject({
   source: z.enum(['statement', 'manual-correction'])
 });
 
-export type CreateDebtInput = z.infer<typeof createDebtInputSchema>;
-export type UpdateDebtInput = z.infer<typeof updateDebtInputSchema>;
+export type CreateDebtInput = z.input<typeof createDebtInputSchema>;
+export type UpdateDebtInput = z.input<typeof updateDebtInputSchema>;
 export type ReconcileBalanceInput = z.infer<typeof reconcileBalanceInputSchema>;
 
 export class DebtService {
@@ -128,6 +129,7 @@ export class DebtService {
             type: valid.type,
             balanceAsOf: valid.balanceAsOf,
             aprBasisPoints: valid.aprBasisPoints,
+            promotionalAprEndsOn: valid.promotionalAprEndsOn,
             minimumPaymentMinor: valid.minimumPaymentMinor,
             dueDay: valid.dueDay,
             notes: valid.notes,

@@ -1,6 +1,6 @@
-import type { Currency, MoneyMinor, ScenarioDebtInput } from '$lib/domain';
+import type { Currency, MoneyMinor, PayoffAlgorithm, ScenarioDebtInput } from '$lib/domain';
 
-export type DebtType = 'credit-card' | 'loan' | 'overdraft' | 'other';
+export type DebtType = 'credit-card' | 'balance-transfer' | 'loan' | 'overdraft' | 'other';
 export type BalanceSource = 'user' | 'estimated';
 export type SnapshotSource = 'setup' | 'statement' | 'manual-correction' | 'payment-estimate';
 
@@ -13,6 +13,7 @@ export interface Debt {
   balanceAsOf: string;
   balanceSource: BalanceSource;
   aprBasisPoints: number | null;
+  promotionalAprEndsOn: string | null;
   minimumPaymentMinor: MoneyMinor;
   dueDay: number | null;
   notes: string;
@@ -37,7 +38,7 @@ export interface Scenario {
   name: string;
   monthlyBudgetMinor: MoneyMinor;
   startMonth: string;
-  algorithm: 'snowball';
+  algorithm: PayoffAlgorithm;
   debtSnapshot: ScenarioDebtInput[];
   sourceScenarioId: string | null;
   createdAt: string;
