@@ -22,4 +22,8 @@ pnpm quality
 pnpm test:e2e
 ```
 
+## Deploying to Vercel
+
+Import the repository into Vercel. The included `vercel.json` runs `pnpm build` and deploys the generated `build` directory as static assets; no environment variables are required.
+
 All financial data remains in the browser. The application has no backend, analytics, or third-party runtime requests.
