@@ -824,3 +824,13 @@ The architecture should permit, but the MVP must not prematurely implement:
 - Additional currency minor-unit rules.
 - CSV export of amortization schedules.
 - Installable PWA metadata and platform-specific enhancements.
+
+## 17. Milestone 2 contract clarifications
+
+The implemented domain contract extends the abbreviated interfaces above with three optional or derived fields required by the warning and comparison requirements:
+
+- `ScenarioDebtInput.balanceSource?: 'user' | 'estimated'` enables `ESTIMATED_BALANCE` warnings.
+- `CalculatePlanInput.previousPayoffOrder?: string[]` enables deterministic `PAYOFF_ORDER_CHANGED` warnings during reconciliation.
+- `PlanProjection.minimumOnlyComparison` contains the available comparison metrics or a typed `NON_CONVERGING_DEBT` reason.
+
+These additions do not change persisted v1 data requirements: omitted `balanceSource` is treated as user-entered, and `previousPayoffOrder` is calculation context rather than persisted scenario data.

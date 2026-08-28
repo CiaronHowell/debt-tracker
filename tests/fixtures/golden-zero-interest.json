@@ -1,0 +1,112 @@
+{
+  "input": {
+    "currency": "GBP",
+    "startMonth": "2026-01",
+    "monthlyBudgetMinor": 100,
+    "debts": [
+      {
+        "debtId": "a",
+        "name": "Small debt",
+        "balanceMinor": 100,
+        "aprBasisPoints": 0,
+        "minimumPaymentMinor": 20,
+        "createdAt": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "debtId": "b",
+        "name": "Large debt",
+        "balanceMinor": 200,
+        "aprBasisPoints": 0,
+        "minimumPaymentMinor": 20,
+        "createdAt": "2026-01-02T00:00:00.000Z"
+      }
+    ]
+  },
+  "expected": {
+    "payoffOrder": ["a", "b"],
+    "debtFreeMonth": "2026-03",
+    "durationMonths": 3,
+    "totalStartingBalanceMinor": 300,
+    "totalInterestMinor": 0,
+    "totalPaidMinor": 300,
+    "months": [
+      {
+        "month": "2026-01",
+        "monthNumber": 1,
+        "targetDebtId": "a",
+        "totalInterestMinor": 0,
+        "totalPaymentMinor": 100,
+        "debts": [
+          {
+            "debtId": "a",
+            "name": "Small debt",
+            "openingBalanceMinor": 100,
+            "interestMinor": 0,
+            "requiredPaymentMinor": 20,
+            "paymentMinor": 80,
+            "principalReductionMinor": 80,
+            "closingBalanceMinor": 20
+          },
+          {
+            "debtId": "b",
+            "name": "Large debt",
+            "openingBalanceMinor": 200,
+            "interestMinor": 0,
+            "requiredPaymentMinor": 20,
+            "paymentMinor": 20,
+            "principalReductionMinor": 20,
+            "closingBalanceMinor": 180
+          }
+        ]
+      },
+      {
+        "month": "2026-02",
+        "monthNumber": 2,
+        "targetDebtId": "a",
+        "totalInterestMinor": 0,
+        "totalPaymentMinor": 100,
+        "debts": [
+          {
+            "debtId": "a",
+            "name": "Small debt",
+            "openingBalanceMinor": 20,
+            "interestMinor": 0,
+            "requiredPaymentMinor": 20,
+            "paymentMinor": 20,
+            "principalReductionMinor": 20,
+            "closingBalanceMinor": 0
+          },
+          {
+            "debtId": "b",
+            "name": "Large debt",
+            "openingBalanceMinor": 180,
+            "interestMinor": 0,
+            "requiredPaymentMinor": 20,
+            "paymentMinor": 80,
+            "principalReductionMinor": 80,
+            "closingBalanceMinor": 100
+          }
+        ]
+      },
+      {
+        "month": "2026-03",
+        "monthNumber": 3,
+        "targetDebtId": "b",
+        "totalInterestMinor": 0,
+        "totalPaymentMinor": 100,
+        "debts": [
+          {
+            "debtId": "b",
+            "name": "Large debt",
+            "openingBalanceMinor": 100,
+            "interestMinor": 0,
+            "requiredPaymentMinor": 20,
+            "paymentMinor": 100,
+            "principalReductionMinor": 100,
+            "closingBalanceMinor": 0
+          }
+        ]
+      }
+    ]
+  }
+}
