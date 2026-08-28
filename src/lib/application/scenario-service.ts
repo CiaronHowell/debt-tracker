@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import type { ScenarioDebtInput } from '$lib/domain';
+import {
+  calculatePlan,
+  type CalculatePlanResult,
+  type PlanProjection,
+  type ScenarioDebtInput
+} from '$lib/domain';
 import type { DebtTrackerDatabase } from '$lib/persistence/db';
 import { scenarioFingerprint } from '$lib/persistence/fingerprint';
 import type { Debt, Scenario } from '$lib/persistence/models';
@@ -17,6 +22,16 @@ import { calculateScenarioProjection } from './plan-service';
 import { resolveDependencies, type ServiceDependencies } from './service-utils';
 import { validateInput } from './validation';
 
+const scenarioDraftInputSchema = z.strictObject({
+  monthlyBudgetMinor: positiveMoneyMinorSchema,
+  startMonth: yearMonthSchema
+});
+
+const renameScenarioInputSchema = z.strictObject({
+  scenarioId: identifierSchema,
+  name: z.string().trim().min(1).max(80)
+});
+
 const createScenarioInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(80),
   monthlyBudgetMinor: positiveMoneyMinorSchema,
@@ -25,6 +40,13 @@ const createScenarioInputSchema = z.strictObject({
 });
 
 export type CreateScenarioInput = z.infer<typeof createScenarioInputSchema>;
+export type PreviewScenarioInput = z.infer<typeof scenarioDraftInputSchema>;
+
+export interface SavedScenarioView {
+  scenario: Scenario;
+  projection: PlanProjection;
+  isStale: boolean;
+}
 
 function debtToScenarioInput(debt: Debt): ScenarioDebtInput {
   return {
@@ -53,6 +75,70 @@ export class ScenarioService {
   private async currentDebtSnapshot(): Promise<ScenarioDebtInput[]> {
     const debts = await this.repositories.debts.active();
     return debts.filter((debt) => debt.currentBalanceMinor > 0).map(debtToScenarioInput);
+  }
+
+  async list(): Promise<Scenario[]> {
+    const scenarios = await this.repositories.scenarios.all();
+    return scenarios.sort((left, right) =>
+      left.createdAt === right.createdAt
+        ? left.id.localeCompare(right.id)
+        : left.createdAt.localeCompare(right.createdAt)
+    );
+  }
+
+  async workspace(): Promise<SavedScenarioView[]> {
+    const settings = await this.repositories.planSettings.primary();
+    if (!settings) throw new AppError('VALIDATION_FAILED', 'Plan settings are missing.');
+    const [scenarios, currentFingerprint] = await Promise.all([
+      this.list(),
+      this.currentDebtSnapshot().then(scenarioFingerprint)
+    ]);
+
+    return Promise.all(
+      scenarios.map(async (scenario) => ({
+        scenario,
+        projection: calculateScenarioProjection(settings, scenario),
+        isStale: (await scenarioFingerprint(scenario.debtSnapshot)) !== currentFingerprint
+      }))
+    );
+  }
+
+  async preview(input: PreviewScenarioInput): Promise<CalculatePlanResult> {
+    const valid = validateInput(scenarioDraftInputSchema, input);
+    const settings = await this.repositories.planSettings.primary();
+    if (!settings) throw new AppError('VALIDATION_FAILED', 'Plan settings are missing.');
+    return calculatePlan({
+      currency: settings.currency,
+      startMonth: valid.startMonth,
+      monthlyBudgetMinor: valid.monthlyBudgetMinor,
+      debts: await this.currentDebtSnapshot()
+    });
+  }
+
+  async rename(scenarioId: string, name: string): Promise<Scenario> {
+    const valid = validateInput(renameScenarioInputSchema, { scenarioId, name });
+    try {
+      return await runWriteTransaction(
+        this.database,
+        [this.database.scenarios],
+        async () => {
+          const scenario = await this.repositories.scenarios.get(valid.scenarioId);
+          if (!scenario) {
+            throw new AppError('VALIDATION_FAILED', 'The selected scenario no longer exists.');
+          }
+          const renamed = parseScenario({
+            ...scenario,
+            name: valid.name,
+            updatedAt: this.dependencies.now()
+          });
+          await this.repositories.scenarios.put(renamed);
+          return renamed;
+        },
+        this.dependencies.now
+      );
+    } catch (error) {
+      throw persistenceWriteError(error);
+    }
   }
 
   async create(input: CreateScenarioInput): Promise<Scenario> {
@@ -180,6 +266,12 @@ export class ScenarioService {
 
   async activate(scenarioId: string): Promise<Scenario> {
     const validId = validateInput(identifierSchema, scenarioId);
+    if (await this.isStale(validId)) {
+      throw new AppError(
+        'VALIDATION_FAILED',
+        'Refresh this saved plan with current balances before making it active.'
+      );
+    }
 
     try {
       return await runWriteTransaction(

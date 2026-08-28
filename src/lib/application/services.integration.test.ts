@@ -228,3 +228,68 @@ describe('transactional application services', () => {
     await expect(planService.getActivePlanReview()).resolves.toMatchObject({ isStale: false });
   });
 });
+
+describe('scenario workspace services', () => {
+  it('lists, previews, renames, refreshes, and safely activates saved plans', async () => {
+    const database = createDatabase('scenario-workspace');
+    const debtService = new DebtService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('debt-1', 'setup-snapshot-1', 'reconcile-snapshot-1')
+    });
+    await debtService.create(debtInput);
+    const planService = new PlanService(database, { now: () => FIXED_NOW });
+    await planService.saveSettings({
+      currency: 'GBP',
+      startMonth: '2026-08',
+      monthlyBudgetMinor: 5_000
+    });
+    const scenarioService = new ScenarioService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('scenario-1', 'scenario-2')
+    });
+    const active = await scenarioService.createAndActivate({
+      name: 'Primary plan',
+      monthlyBudgetMinor: 5_000,
+      startMonth: '2026-08'
+    });
+    const alternative = await scenarioService.create({
+      name: 'Faster plan',
+      monthlyBudgetMinor: 7_500,
+      startMonth: '2026-08',
+      sourceScenarioId: active.id
+    });
+
+    await expect(scenarioService.workspace()).resolves.toMatchObject([
+      { scenario: { id: active.id, name: 'Primary plan' }, isStale: false },
+      { scenario: { id: alternative.id, name: 'Faster plan' }, isStale: false }
+    ]);
+    await expect(
+      scenarioService.preview({ monthlyBudgetMinor: 7_500, startMonth: '2026-08' })
+    ).resolves.toMatchObject({ status: 'success', durationMonths: 2 });
+    await expect(database.scenarios.count()).resolves.toBe(2);
+
+    await expect(scenarioService.rename(alternative.id, 'Weekend plan')).resolves.toMatchObject({
+      name: 'Weekend plan'
+    });
+    await debtService.reconcileBalance({
+      debtId: 'debt-1',
+      balanceMinor: 8_000,
+      recordedOn: '2026-08-28',
+      source: 'statement'
+    });
+    await expect(scenarioService.activate(alternative.id)).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'Refresh this saved plan with current balances before making it active.'
+    });
+
+    await scenarioService.refresh(alternative.id);
+    await expect(scenarioService.activate(alternative.id)).resolves.toMatchObject({
+      id: alternative.id,
+      name: 'Weekend plan'
+    });
+    await expect(planService.getSettings()).resolves.toMatchObject({
+      activeScenarioId: alternative.id,
+      monthlyBudgetMinor: 7_500
+    });
+  });
+});
