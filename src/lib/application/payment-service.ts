@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sumMoney } from '$lib/domain/money';
 import type { DebtTrackerDatabase } from '$lib/persistence/db';
 import type { Payment } from '$lib/persistence/models';
 import { createRepositories } from '$lib/persistence/repositories';
@@ -24,6 +25,11 @@ const recordPaymentInputSchema = z.strictObject({
 
 export type RecordPaymentInput = z.infer<typeof recordPaymentInputSchema>;
 
+export interface PaymentHistorySummary {
+  recent: Payment[];
+  totalPaidMinor: number;
+}
+
 export class PaymentService {
   private readonly repositories;
   private readonly dependencies: ServiceDependencies;
@@ -34,6 +40,20 @@ export class PaymentService {
   ) {
     this.repositories = createRepositories(database);
     this.dependencies = resolveDependencies(dependencies);
+  }
+
+  async history(limit = 5): Promise<PaymentHistorySummary> {
+    const payments = await this.repositories.payments.all();
+    payments.sort((left, right) => {
+      const byDate = right.paidOn.localeCompare(left.paidOn);
+      if (byDate !== 0) return byDate;
+      const byCreated = right.createdAt.localeCompare(left.createdAt);
+      return byCreated !== 0 ? byCreated : right.id.localeCompare(left.id);
+    });
+    return {
+      recent: payments.slice(0, Math.max(0, limit)),
+      totalPaidMinor: sumMoney(payments.map((payment) => payment.amountMinor))
+    };
   }
 
   async record(input: RecordPaymentInput): Promise<Payment> {

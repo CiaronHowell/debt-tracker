@@ -167,4 +167,64 @@ describe('transactional application services', () => {
     expect(refreshed.debtSnapshot[0]?.balanceMinor).toBe(8_000);
     await expect(scenarioService.isStale(scenario.id)).resolves.toBe(false);
   });
+
+  it('previews payment changes without replacing the active plan until confirmation', async () => {
+    const database = createDatabase('payment-review');
+    const debtService = new DebtService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('debt-1', 'setup-snapshot-1')
+    });
+    await debtService.create(debtInput);
+    const planService = new PlanService(database, { now: () => FIXED_NOW });
+    await planService.saveSettings({
+      currency: 'GBP',
+      startMonth: '2026-08',
+      monthlyBudgetMinor: 5_000
+    });
+    const scenarioService = new ScenarioService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('scenario-1', 'scenario-2')
+    });
+    const original = await scenarioService.createAndActivate({
+      name: 'Primary plan',
+      monthlyBudgetMinor: 5_000,
+      startMonth: '2026-08'
+    });
+
+    const paymentService = new PaymentService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('payment-1', 'payment-snapshot-1')
+    });
+    await paymentService.record({
+      debtId: 'debt-1',
+      amountMinor: 2_500,
+      paidOn: '2026-08-28',
+      note: ''
+    });
+
+    const pending = await planService.getActivePlanReview();
+    expect(pending).toMatchObject({
+      isStale: true,
+      scenario: { id: original.id },
+      currentProjection: { totalStartingBalanceMinor: 7_500 }
+    });
+    await expect(database.planSettings.get('primary')).resolves.toMatchObject({
+      activeScenarioId: original.id
+    });
+    await expect(paymentService.history()).resolves.toMatchObject({
+      totalPaidMinor: 2_500,
+      recent: [{ id: 'payment-1' }]
+    });
+
+    const replacement = await scenarioService.createAndActivate({
+      name: 'Updated payment plan',
+      monthlyBudgetMinor: original.monthlyBudgetMinor,
+      startMonth: original.startMonth,
+      sourceScenarioId: original.id
+    });
+    await expect(database.planSettings.get('primary')).resolves.toMatchObject({
+      activeScenarioId: replacement.id
+    });
+    await expect(planService.getActivePlanReview()).resolves.toMatchObject({ isStale: false });
+  });
 });

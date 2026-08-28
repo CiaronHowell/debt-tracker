@@ -19,3 +19,14 @@ export function formatYearMonth(value: string): string {
     timeZone: 'UTC'
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
+
+export function formatCalendarDate(value: string): string {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC'
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
