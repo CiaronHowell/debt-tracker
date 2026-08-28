@@ -26,13 +26,14 @@
     ScenarioService,
     type ActivePlanReview
   } from '$lib/application';
-  import { getDatabase, type Debt, type Payment } from '$lib/persistence';
+  import { getDatabase, getPersistenceMode, type Debt, type Payment } from '$lib/persistence';
   import type { Currency } from '$lib/domain';
   import { formatCalendarDate, formatYearMonth } from '$lib/utils/dates';
   import { formatMoney } from '$lib/utils/money';
   import { explainPlanChanges } from '$lib/utils/plan-explanations';
 
   const database = getDatabase();
+  const memoryOnly = getPersistenceMode() === 'memory';
   const debtService = new DebtService(database);
   const paymentService = new PaymentService(database);
   const planService = new PlanService(database);
@@ -164,7 +165,9 @@
       latestPayment = null;
       reconciliationOpen = false;
       await loadData();
-      statusMessage = 'Your updated plan is now active and saved on this device.';
+      statusMessage = memoryOnly
+        ? 'Your updated plan is now active for this session.'
+        : 'Your updated plan is now active and saved on this device.';
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'The updated plan could not be activated.';
     } finally {
@@ -370,7 +373,9 @@
         <span class="metric-icon"><TrendingDown size={19} aria-hidden="true" /></span>
         <p>Payments recorded</p>
         <strong>{formatMoney(totalPaidMinor, currency)}</strong>
-        <span>Based on the payments saved in this browser.</span>
+        <span
+          >Based on the payments {memoryOnly ? 'in this session' : 'saved in this browser'}.</span
+        >
       </article>
     </section>
 
@@ -404,7 +409,7 @@
       <section class="home-section" aria-labelledby="recent-payments-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Saved history</p>
+            <p class="eyebrow">{memoryOnly ? 'Session history' : 'Saved history'}</p>
             <h2 id="recent-payments-title">Recent payments</h2>
           </div>
           <History size={20} aria-hidden="true" />

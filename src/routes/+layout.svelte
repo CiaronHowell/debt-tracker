@@ -12,7 +12,7 @@
 
   async function enforceSetup(): Promise<void> {
     const path = page.url.pathname;
-    if (path.startsWith('/setup') || path.startsWith('/settings')) {
+    if (path.startsWith('/setup') || path.startsWith('/settings') || path.startsWith('/privacy')) {
       shellReady = true;
       return;
     }

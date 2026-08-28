@@ -32,13 +32,14 @@
     type SavedScenarioView
   } from '$lib/application';
   import type { CalculationFailure, Currency, PlanProjection } from '$lib/domain';
-  import { getDatabase, type PlanSettings } from '$lib/persistence';
+  import { getDatabase, getPersistenceMode, type PlanSettings } from '$lib/persistence';
   import { formatYearMonth } from '$lib/utils/dates';
   import { formatMoney, formatMoneyInput, parseMoneyInput } from '$lib/utils/money';
 
   const PAGE_SIZE = 24;
   const RECALCULATION_DELAY_MS = 120;
   const database = getDatabase();
+  const memoryOnly = getPersistenceMode() === 'memory';
   const planService = new PlanService(database);
   const scenarioService = new ScenarioService(database);
   type ActivationMode = 'selected' | 'draft';
@@ -235,7 +236,9 @@
         sourceScenarioId: selected.scenario.id
       });
       await loadWorkspace(scenario.id);
-      statusMessage = `${scenario.name} was saved on this device.`;
+      statusMessage = memoryOnly
+        ? `${scenario.name} is available for this session.`
+        : `${scenario.name} was saved on this device.`;
     });
   }
 

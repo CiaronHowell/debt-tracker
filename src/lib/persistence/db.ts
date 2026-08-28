@@ -1,6 +1,28 @@
 import Dexie, { type EntityTable } from 'dexie';
+import { IDBKeyRange as MemoryIDBKeyRange, indexedDB as memoryIndexedDB } from 'fake-indexeddb';
 import { configureMigrations, DATABASE_NAME, DATABASE_VERSION } from './migrations';
 import type { AppMeta, BalanceSnapshot, Debt, Payment, PlanSettings, Scenario } from './models';
+import { setPersistenceMode } from './storage-mode';
+
+function databaseOptions(): { indexedDB: IDBFactory; IDBKeyRange: typeof IDBKeyRange } {
+  try {
+    if (
+      typeof globalThis.indexedDB !== 'undefined' &&
+      typeof globalThis.IDBKeyRange !== 'undefined'
+    ) {
+      setPersistenceMode('persistent');
+      return { indexedDB: globalThis.indexedDB, IDBKeyRange: globalThis.IDBKeyRange };
+    }
+  } catch {
+    // Some privacy modes expose IndexedDB properties that throw when accessed.
+  }
+
+  setPersistenceMode('memory');
+  return {
+    indexedDB: memoryIndexedDB,
+    IDBKeyRange: MemoryIDBKeyRange
+  };
+}
 
 export class DebtTrackerDatabase extends Dexie {
   debts!: EntityTable<Debt, 'id'>;
@@ -11,7 +33,7 @@ export class DebtTrackerDatabase extends Dexie {
   appMeta!: EntityTable<AppMeta, 'key'>;
 
   constructor(name = DATABASE_NAME) {
-    super(name);
+    super(name, databaseOptions());
     configureMigrations(this);
 
     this.on('populate', (transaction) => {

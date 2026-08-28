@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import { ChartNoAxesCombined, CircleGauge, Home, Settings, WalletCards } from '@lucide/svelte';
   import SaveStatus from '$lib/components/shared/SaveStatus.svelte';
+  import UpdatePrompt from '$lib/components/shared/UpdatePrompt.svelte';
 
   let { children } = $props();
 
@@ -55,6 +56,8 @@
       </a>
       <SaveStatus />
     </header>
+
+    <UpdatePrompt />
 
     <main id="main-content" tabindex="-1">
       {@render children()}

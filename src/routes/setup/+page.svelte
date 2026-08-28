@@ -17,11 +17,12 @@
   import { calculatePlan, type Currency } from '$lib/domain';
   import DebtForm, { type DebtFormSubmission } from '$lib/components/debts/DebtForm.svelte';
   import { DebtService, PlanService, ScenarioService } from '$lib/application';
-  import { getDatabase, type Debt, type PlanSettings } from '$lib/persistence';
+  import { getDatabase, getPersistenceMode, type Debt, type PlanSettings } from '$lib/persistence';
   import { currentLocalMonth, formatYearMonth } from '$lib/utils/dates';
   import { formatMoney, formatMoneyInput, parseMoneyInput } from '$lib/utils/money';
 
   const database = getDatabase();
+  const memoryOnly = getPersistenceMode() === 'memory';
   const debtService = new DebtService(database);
   const planService = new PlanService(database);
   const scenarioService = new ScenarioService(database);
@@ -224,17 +225,23 @@
         <ShieldCheck size={34} strokeWidth={1.6} aria-hidden="true" />
       </div>
       <p class="eyebrow">Before we begin</p>
-      <h1>Your plan stays on this device.</h1>
+      <h1>{memoryOnly ? 'Build a plan for this session.' : 'Your plan stays on this device.'}</h1>
       <p class="lead">
-        There is no account and nothing is sent to a server. Your debts and payment history are
-        stored privately in this browser.
+        There is no account and nothing is sent to a server.
+        {memoryOnly
+          ? ' Browser storage is unavailable, so this plan lasts only until you close the tab.'
+          : ' Your debts and payment history are stored privately in this browser.'}
       </p>
       <ul class="feature-list">
         <li>
           <Check size={18} aria-hidden="true" /><span>Calculations happen in your browser</span>
         </li>
         <li>
-          <Database size={18} aria-hidden="true" /><span>Your progress saves on this device</span>
+          <Database size={18} aria-hidden="true" /><span
+            >{memoryOnly
+              ? 'Your progress is available for this session'
+              : 'Your progress saves on this device'}</span
+          >
         </li>
         <li>
           <ShieldCheck size={18} aria-hidden="true" /><span>You can create an encrypted backup</span
@@ -242,7 +249,9 @@
         </li>
       </ul>
       <div class="warning-note">
-        Clearing browser data can remove your plan. We’ll remind you to create a backup after setup.
+        {memoryOnly
+          ? 'Changes disappear when this tab closes. Export a backup from Settings before leaving.'
+          : 'Clearing browser data can remove your plan. We’ll remind you to create a backup after setup.'}
       </div>
       {#if pageError}<p class="form-error" role="alert">{pageError}</p>{/if}
       <button
