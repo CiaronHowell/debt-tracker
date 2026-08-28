@@ -89,6 +89,51 @@ export class ScenarioService {
     }
   }
 
+  async createAndActivate(input: CreateScenarioInput): Promise<Scenario> {
+    const valid = validateInput(createScenarioInputSchema, input);
+    const settings = await this.repositories.planSettings.primary();
+    if (!settings) {
+      throw new AppError('VALIDATION_FAILED', 'Save plan settings before activating a scenario.');
+    }
+    const debtSnapshot = await this.currentDebtSnapshot();
+    const now = this.dependencies.now();
+    const scenario = parseScenario({
+      id: this.dependencies.createId(),
+      name: valid.name,
+      monthlyBudgetMinor: valid.monthlyBudgetMinor,
+      startMonth: valid.startMonth,
+      algorithm: 'snowball',
+      debtSnapshot,
+      sourceScenarioId: valid.sourceScenarioId ?? null,
+      createdAt: now,
+      updatedAt: now
+    });
+    calculateScenarioProjection(settings, scenario);
+
+    try {
+      await runWriteTransaction(
+        this.database,
+        [this.database.scenarios, this.database.planSettings],
+        async () => {
+          await this.repositories.scenarios.add(scenario);
+          await this.repositories.planSettings.put(
+            parsePlanSettings({
+              ...settings,
+              monthlyBudgetMinor: scenario.monthlyBudgetMinor,
+              startMonth: scenario.startMonth,
+              activeScenarioId: scenario.id,
+              setupCompletedAt: now,
+              updatedAt: now
+            })
+          );
+        },
+        this.dependencies.now
+      );
+      return scenario;
+    } catch (error) {
+      throw persistenceWriteError(error);
+    }
+  }
   async isStale(scenarioId: string): Promise<boolean> {
     const validId = validateInput(identifierSchema, scenarioId);
     const scenario = await this.repositories.scenarios.get(validId);

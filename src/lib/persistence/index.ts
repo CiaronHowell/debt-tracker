@@ -7,6 +7,7 @@ export type {
   BackupPayload,
   BalanceSnapshot,
   Debt,
+  DebtType,
   EncryptedBackupEnvelope,
   Payment,
   PlainBackupEnvelope,

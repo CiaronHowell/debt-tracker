@@ -32,7 +32,11 @@ const createDebtInputSchema = z.strictObject({
   balanceAsOf: calendarDateSchema
 });
 
-const updateDebtInputSchema = z.strictObject(editableDebtFields);
+const updateDebtInputSchema = z.strictObject({
+  ...editableDebtFields,
+  balanceMinor: positiveMoneyMinorSchema,
+  balanceAsOf: calendarDateSchema
+});
 const reconcileBalanceInputSchema = z.strictObject({
   debtId: identifierSchema,
   balanceMinor: moneyMinorSchema,
@@ -40,9 +44,9 @@ const reconcileBalanceInputSchema = z.strictObject({
   source: z.enum(['statement', 'manual-correction'])
 });
 
-type CreateDebtInput = z.infer<typeof createDebtInputSchema>;
-type UpdateDebtInput = z.infer<typeof updateDebtInputSchema>;
-type ReconcileBalanceInput = z.infer<typeof reconcileBalanceInputSchema>;
+export type CreateDebtInput = z.infer<typeof createDebtInputSchema>;
+export type UpdateDebtInput = z.infer<typeof updateDebtInputSchema>;
+export type ReconcileBalanceInput = z.infer<typeof reconcileBalanceInputSchema>;
 
 export class DebtService {
   private readonly repositories;
@@ -108,19 +112,44 @@ export class DebtService {
     try {
       return await runWriteTransaction(
         this.database,
-        [this.database.debts],
+        [this.database.debts, this.database.balanceSnapshots],
         async () => {
           const existing = await this.repositories.debts.get(validId);
           if (!existing) {
             throw new AppError('VALIDATION_FAILED', 'The selected debt no longer exists.');
           }
+          const now = this.dependencies.now();
+          const balanceChanged =
+            existing.currentBalanceMinor !== valid.balanceMinor ||
+            existing.balanceAsOf !== valid.balanceAsOf;
           const updated = parseDebt({
             ...existing,
-            ...valid,
+            name: valid.name,
+            type: valid.type,
+            balanceAsOf: valid.balanceAsOf,
+            aprBasisPoints: valid.aprBasisPoints,
+            minimumPaymentMinor: valid.minimumPaymentMinor,
+            dueDay: valid.dueDay,
+            notes: valid.notes,
+            colorKey: valid.colorKey,
             id: existing.id,
-            updatedAt: this.dependencies.now()
+            currentBalanceMinor: valid.balanceMinor,
+            balanceSource: balanceChanged ? 'user' : existing.balanceSource,
+            updatedAt: now
           });
           await this.repositories.debts.put(updated);
+          if (balanceChanged) {
+            await this.repositories.balanceSnapshots.add(
+              parseBalanceSnapshot({
+                id: this.dependencies.createId(),
+                debtId: existing.id,
+                balanceMinor: valid.balanceMinor,
+                recordedOn: valid.balanceAsOf,
+                source: 'manual-correction',
+                createdAt: now
+              })
+            );
+          }
           return updated;
         },
         this.dependencies.now

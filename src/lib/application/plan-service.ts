@@ -3,11 +3,7 @@ import { calculatePlan, type PlanProjection } from '$lib/domain';
 import type { DebtTrackerDatabase } from '$lib/persistence/db';
 import type { PlanSettings, Scenario } from '$lib/persistence/models';
 import { createRepositories } from '$lib/persistence/repositories';
-import {
-  positiveMoneyMinorSchema,
-  parsePlanSettings,
-  yearMonthSchema
-} from '$lib/persistence/schemas';
+import { moneyMinorSchema, parsePlanSettings, yearMonthSchema } from '$lib/persistence/schemas';
 import { runWriteTransaction } from '$lib/persistence/transactions';
 import { AppError, persistenceWriteError } from './errors';
 import { resolveDependencies, type ServiceDependencies } from './service-utils';
@@ -16,7 +12,7 @@ import { validateInput } from './validation';
 const savePlanSettingsInputSchema = z.strictObject({
   currency: z.enum(['GBP', 'EUR', 'USD']),
   startMonth: yearMonthSchema,
-  monthlyBudgetMinor: positiveMoneyMinorSchema
+  monthlyBudgetMinor: moneyMinorSchema
 });
 
 export type SavePlanSettingsInput = z.infer<typeof savePlanSettingsInputSchema>;

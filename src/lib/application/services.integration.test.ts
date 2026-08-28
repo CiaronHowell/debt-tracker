@@ -98,6 +98,39 @@ describe('transactional application services', () => {
     });
   });
 
+  it('updates debt details and a corrected balance in one command', async () => {
+    const database = createDatabase('debt-edit');
+    const debtService = new DebtService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('debt-1', 'setup-snapshot-1', 'correction-snapshot-1')
+    });
+    await debtService.create(debtInput);
+
+    const updated = await debtService.update('debt-1', {
+      name: 'Updated card',
+      type: 'credit-card',
+      balanceMinor: 8_000,
+      balanceAsOf: '2026-08-28',
+      aprBasisPoints: 0,
+      minimumPaymentMinor: 1_000,
+      dueDay: 15,
+      notes: 'Updated locally',
+      colorKey: null
+    });
+
+    expect(updated).toMatchObject({
+      name: 'Updated card',
+      currentBalanceMinor: 8_000,
+      dueDay: 15,
+      balanceSource: 'user'
+    });
+    await expect(database.balanceSnapshots.count()).resolves.toBe(2);
+    await expect(database.balanceSnapshots.get('correction-snapshot-1')).resolves.toMatchObject({
+      source: 'manual-correction',
+      balanceMinor: 8_000
+    });
+  });
+
   it('detects canonical debt changes and clears staleness after refresh', async () => {
     const database = createDatabase('scenario-staleness');
     const debtService = new DebtService(database, {

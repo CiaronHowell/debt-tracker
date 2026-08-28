@@ -18,9 +18,12 @@ test('renders the private action-first application shell without third-party req
 
   await page.goto('/');
 
-  await expect(page).toHaveTitle('Home | Debt Tracker');
-  await expect(page.getByRole('heading', { name: 'Know exactly what to pay next.' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Build my plan' })).toBeVisible();
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page).toHaveTitle('Set up your plan | Debt Tracker');
+  await expect(
+    page.getByRole('heading', { name: 'Your plan stays on this device.' })
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to debts' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Main menu' }).first()).toBeVisible();
   expect(externalRequests).toEqual([]);
   expect(browserErrors).toEqual([]);
