@@ -24,6 +24,6 @@ pnpm test:e2e
 
 ## Deploying to Vercel
 
-Import the repository into Vercel. The included `vercel.json` runs `pnpm build` and deploys the generated `build` directory as static assets; no environment variables are required.
+Import the repository into Vercel and keep the detected SvelteKit defaults. During Vercel builds, `adapter-static` automatically emits Vercel's static Build Output API files; no output-directory override or environment variables are required.
 
 All financial data remains in the browser. The application has no backend, analytics, or third-party runtime requests.

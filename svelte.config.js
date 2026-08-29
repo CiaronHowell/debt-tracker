@@ -3,11 +3,7 @@ import adapter from '@sveltejs/adapter-static';
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   kit: {
-    adapter: adapter({
-      fallback: '200.html',
-      precompress: true,
-      strict: true
-    }),
+    adapter: adapter(),
     csp: {
       mode: 'hash',
       directives: {
