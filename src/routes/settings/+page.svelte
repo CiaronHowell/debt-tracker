@@ -362,7 +362,9 @@
           </h3>
           <p>
             {preview.counts.debts} debts · {preview.counts.scenarios} plans · {preview.counts
-              .payments} payments · {preview.counts.balanceSnapshots} balance records
+              .payments} debt payments · {preview.counts.payLaterPlans} pay-later plans · {preview
+              .counts.payLaterPayments} pay-later payments · {preview.counts.balanceSnapshots}
+            balance records
           </p>
         </div>
         <div class="danger-note">

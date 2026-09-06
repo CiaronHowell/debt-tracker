@@ -2,7 +2,7 @@ import type Dexie from 'dexie';
 import type { Transaction } from 'dexie';
 import type { AppMeta, Debt, Scenario } from './models';
 
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 3;
 export const DATABASE_NAME = 'debt-tracker';
 
 export const LEGACY_SCHEMA = {
@@ -19,6 +19,12 @@ export const V1_SCHEMA = {
   payments: '&id, debtId, paidOn, createdAt',
   balanceSnapshots: '&id, debtId, recordedOn, createdAt',
   appMeta: '&key'
+} as const;
+
+export const V3_SCHEMA = {
+  ...V1_SCHEMA,
+  payLaterPlans: '&id, archivedAt, deadlineDate, updatedAt',
+  payLaterPayments: '&id, planId, paidOn, createdAt'
 } as const;
 
 interface LegacyDebt extends Partial<Debt> {
@@ -69,8 +75,17 @@ async function migrateV1ToV2(transaction: Transaction): Promise<void> {
   });
 }
 
+async function migrateV2ToV3(transaction: Transaction): Promise<void> {
+  await transaction.table<AppMeta, string>('appMeta').put({
+    key: 'schema-version',
+    value: DATABASE_VERSION,
+    updatedAt: new Date().toISOString()
+  });
+}
+
 export function configureMigrations(database: Dexie): void {
   database.version(0.9).stores(LEGACY_SCHEMA);
   database.version(1).stores(V1_SCHEMA).upgrade(migratePreReleaseToV1);
-  database.version(DATABASE_VERSION).stores(V1_SCHEMA).upgrade(migrateV1ToV2);
+  database.version(2).stores(V1_SCHEMA).upgrade(migrateV1ToV2);
+  database.version(DATABASE_VERSION).stores(V3_SCHEMA).upgrade(migrateV2ToV3);
 }

@@ -7,6 +7,8 @@ import type {
   Debt,
   EncryptedBackupEnvelope,
   Payment,
+  PayLaterPayment,
+  PayLaterPlan,
   PlainBackupEnvelope,
   PlanSettings,
   Scenario
@@ -114,6 +116,36 @@ export const paymentSchema = z.strictObject({
   createdAt: utcInstantSchema
 });
 
+export const payLaterPlanSchema = z
+  .strictObject({
+    id: identifierSchema,
+    name: z.string().trim().min(1).max(80),
+    startingBalanceMinor: positiveMoneyMinorSchema,
+    currentBalanceMinor: moneyMinorSchema,
+    purchaseDate: calendarDateSchema,
+    deadlineDate: calendarDateSchema,
+    missedDeadlineAprBasisPoints: aprBasisPointsSchema.nullable(),
+    notes: z.string().max(2_000),
+    createdAt: utcInstantSchema,
+    updatedAt: utcInstantSchema,
+    archivedAt: utcInstantSchema.nullable()
+  })
+  .refine((plan) => plan.deadlineDate >= plan.purchaseDate, {
+    message: 'The payment deadline cannot be before the purchase date.',
+    path: ['deadlineDate']
+  });
+
+export const payLaterPaymentSchema = z.strictObject({
+  id: identifierSchema,
+  planId: identifierSchema,
+  amountMinor: positiveMoneyMinorSchema,
+  paidOn: calendarDateSchema,
+  note: z.string().max(2_000),
+  balanceBeforeMinor: moneyMinorSchema,
+  balanceAfterMinor: moneyMinorSchema,
+  createdAt: utcInstantSchema
+});
+
 export const balanceSnapshotSchema = z.strictObject({
   id: identifierSchema,
   debtId: identifierSchema,
@@ -134,6 +166,8 @@ export const backupPayloadSchema = z.strictObject({
   planSettings: z.array(planSettingsSchema),
   scenarios: z.array(scenarioSchema),
   payments: z.array(paymentSchema),
+  payLaterPlans: z.array(payLaterPlanSchema).default([]),
+  payLaterPayments: z.array(payLaterPaymentSchema).default([]),
   balanceSnapshots: z.array(balanceSnapshotSchema),
   appMeta: z.array(appMetaSchema)
 });
@@ -173,6 +207,14 @@ export function parseScenario(value: unknown): Scenario {
 
 export function parsePayment(value: unknown): Payment {
   return paymentSchema.parse(value) as Payment;
+}
+
+export function parsePayLaterPlan(value: unknown): PayLaterPlan {
+  return payLaterPlanSchema.parse(value) as PayLaterPlan;
+}
+
+export function parsePayLaterPayment(value: unknown): PayLaterPayment {
+  return payLaterPaymentSchema.parse(value) as PayLaterPayment;
 }
 
 export function parseBalanceSnapshot(value: unknown): BalanceSnapshot {

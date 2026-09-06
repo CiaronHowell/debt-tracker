@@ -1,7 +1,16 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { IDBKeyRange as MemoryIDBKeyRange, indexedDB as memoryIndexedDB } from 'fake-indexeddb';
 import { configureMigrations, DATABASE_NAME, DATABASE_VERSION } from './migrations';
-import type { AppMeta, BalanceSnapshot, Debt, Payment, PlanSettings, Scenario } from './models';
+import type {
+  AppMeta,
+  BalanceSnapshot,
+  Debt,
+  Payment,
+  PayLaterPayment,
+  PayLaterPlan,
+  PlanSettings,
+  Scenario
+} from './models';
 import { setPersistenceMode } from './storage-mode';
 
 function databaseOptions(): { indexedDB: IDBFactory; IDBKeyRange: typeof IDBKeyRange } {
@@ -29,6 +38,8 @@ export class DebtTrackerDatabase extends Dexie {
   planSettings!: EntityTable<PlanSettings, 'id'>;
   scenarios!: EntityTable<Scenario, 'id'>;
   payments!: EntityTable<Payment, 'id'>;
+  payLaterPlans!: EntityTable<PayLaterPlan, 'id'>;
+  payLaterPayments!: EntityTable<PayLaterPayment, 'id'>;
   balanceSnapshots!: EntityTable<BalanceSnapshot, 'id'>;
   appMeta!: EntityTable<AppMeta, 'key'>;
 

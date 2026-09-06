@@ -3,6 +3,7 @@ import { DebtTrackerDatabase } from '$lib/persistence/db';
 import type { PlainBackupEnvelope } from '$lib/persistence/models';
 import { BackupService } from './backup-service';
 import { DebtService } from './debt-service';
+import { PayLaterService } from './pay-later-service';
 import { PlanService } from './plan-service';
 import { ScenarioService } from './scenario-service';
 
@@ -65,6 +66,17 @@ describe('BackupService', () => {
   it('round-trips a strict plain backup into a clean database', async () => {
     const source = createDatabase('plain-source');
     await seedActivePlan(source, 'source');
+    await new PayLaterService(source, {
+      now: () => FIXED_NOW,
+      createId: idSequence('pay-later-source')
+    }).create({
+      name: 'Recovery purchase',
+      startingBalanceMinor: 24_000,
+      purchaseDate: '2026-08-28',
+      deadlineDate: '2027-02-28',
+      missedDeadlineAprBasisPoints: 3_499,
+      notes: ''
+    });
     const sourceBackups = new BackupService(source, { now: () => FIXED_NOW });
     const envelope = await sourceBackups.exportPlain();
 
@@ -75,7 +87,7 @@ describe('BackupService', () => {
     });
     expect(await sourceBackups.preview(sourceBackups.serialize(envelope))).toMatchObject({
       encrypted: false,
-      counts: { debts: 1, scenarios: 1 }
+      counts: { debts: 1, scenarios: 1, payLaterPlans: 1, payLaterPayments: 0 }
     });
 
     const target = createDatabase('plain-target');
@@ -85,6 +97,10 @@ describe('BackupService', () => {
     expect(result.activeScenarioId).toBe('scenario-source');
     await expect(target.debts.get('debt-source')).resolves.toMatchObject({
       name: 'Card source'
+    });
+    await expect(target.payLaterPlans.get('pay-later-source')).resolves.toMatchObject({
+      name: 'Recovery purchase',
+      currentBalanceMinor: 24_000
     });
     await expect(new PlanService(target).getActiveProjection()).resolves.toMatchObject({
       status: 'success'
@@ -99,10 +115,14 @@ describe('BackupService', () => {
       payload: {
         debts: Array<Record<string, unknown>>;
         scenarios: Array<{ debtSnapshot: Array<Record<string, unknown>> }>;
+        payLaterPlans?: unknown;
+        payLaterPayments?: unknown;
       };
     };
     delete legacy.payload.debts[0]!.promotionalAprEndsOn;
     delete legacy.payload.scenarios[0]!.debtSnapshot[0]!.promotionalAprEndsOn;
+    delete legacy.payload.payLaterPlans;
+    delete legacy.payload.payLaterPayments;
 
     const target = createDatabase('legacy-target');
     const targetBackups = new BackupService(target, { now: () => FIXED_NOW });

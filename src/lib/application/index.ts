@@ -30,3 +30,12 @@ export {
   type SavedScenarioView
 } from './scenario-service';
 export type { ServiceDependencies } from './service-utils';
+
+export {
+  PayLaterService,
+  type CreatePayLaterPlanInput,
+  type PayLaterPlanView,
+  type PayLaterSummary,
+  type RecordPayLaterPaymentInput,
+  type UpdatePayLaterPlanInput
+} from './pay-later-service';

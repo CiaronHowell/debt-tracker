@@ -35,6 +35,8 @@ export interface BackupPreview {
     debts: number;
     scenarios: number;
     payments: number;
+    payLaterPlans: number;
+    payLaterPayments: number;
     balanceSnapshots: number;
   };
 }
@@ -162,6 +164,14 @@ function validatePayloadRelations(input: unknown): BackupPayload {
     'payment'
   );
   assertUnique(
+    payload.payLaterPlans.map((item) => item.id),
+    'pay-later plan'
+  );
+  assertUnique(
+    payload.payLaterPayments.map((item) => item.id),
+    'pay-later payment'
+  );
+  assertUnique(
     payload.balanceSnapshots.map((item) => item.id),
     'balance snapshot'
   );
@@ -178,10 +188,16 @@ function validatePayloadRelations(input: unknown): BackupPayload {
   }
 
   const debtIds = new Set(payload.debts.map((debt) => debt.id));
+  const payLaterPlanIds = new Set(payload.payLaterPlans.map((plan) => plan.id));
   const scenarioIds = new Set(payload.scenarios.map((scenario) => scenario.id));
   for (const payment of payload.payments) {
     if (!debtIds.has(payment.debtId)) {
       throw new AppError('IMPORT_INVALID', 'A payment references a missing debt.');
+    }
+  }
+  for (const payment of payload.payLaterPayments) {
+    if (!payLaterPlanIds.has(payment.planId)) {
+      throw new AppError('IMPORT_INVALID', 'A pay-later payment references a missing plan.');
     }
   }
   for (const snapshot of payload.balanceSnapshots) {
@@ -231,6 +247,8 @@ function previewFor(decoded: DecodedBackup): BackupPreview {
       debts: payload.debts.length,
       scenarios: payload.scenarios.length,
       payments: payload.payments.length,
+      payLaterPlans: payload.payLaterPlans.length,
+      payLaterPayments: payload.payLaterPayments.length,
       balanceSnapshots: payload.balanceSnapshots.length
     }
   };
@@ -250,27 +268,40 @@ export class BackupService {
       database.planSettings,
       database.scenarios,
       database.payments,
+      database.payLaterPlans,
+      database.payLaterPayments,
       database.balanceSnapshots,
       database.appMeta
     ];
   }
 
   private async readPayload(): Promise<BackupPayload> {
-    const [debts, planSettings, scenarios, payments, balanceSnapshots, appMeta] = await Promise.all(
-      [
-        this.database.debts.toArray(),
-        this.database.planSettings.toArray(),
-        this.database.scenarios.toArray(),
-        this.database.payments.toArray(),
-        this.database.balanceSnapshots.toArray(),
-        this.database.appMeta.toArray()
-      ]
-    );
+    const [
+      debts,
+      planSettings,
+      scenarios,
+      payments,
+      payLaterPlans,
+      payLaterPayments,
+      balanceSnapshots,
+      appMeta
+    ] = await Promise.all([
+      this.database.debts.toArray(),
+      this.database.planSettings.toArray(),
+      this.database.scenarios.toArray(),
+      this.database.payments.toArray(),
+      this.database.payLaterPlans.toArray(),
+      this.database.payLaterPayments.toArray(),
+      this.database.balanceSnapshots.toArray(),
+      this.database.appMeta.toArray()
+    ]);
     return parseBackupPayload({
       debts,
       planSettings,
       scenarios,
       payments,
+      payLaterPlans,
+      payLaterPayments,
       balanceSnapshots,
       appMeta: appMeta.filter((item) => item.key !== INTERNAL_ROLLBACK_KEY)
     });
@@ -389,6 +420,8 @@ export class BackupService {
       this.database.planSettings.clear(),
       this.database.scenarios.clear(),
       this.database.payments.clear(),
+      this.database.payLaterPlans.clear(),
+      this.database.payLaterPayments.clear(),
       this.database.balanceSnapshots.clear(),
       this.database.appMeta.clear()
     ]);
@@ -402,6 +435,12 @@ export class BackupService {
         : Promise.resolve(),
       payload.payments.length
         ? this.database.payments.bulkAdd(payload.payments)
+        : Promise.resolve(),
+      payload.payLaterPlans.length
+        ? this.database.payLaterPlans.bulkAdd(payload.payLaterPlans)
+        : Promise.resolve(),
+      payload.payLaterPayments.length
+        ? this.database.payLaterPayments.bulkAdd(payload.payLaterPayments)
         : Promise.resolve(),
       payload.balanceSnapshots.length
         ? this.database.balanceSnapshots.bulkAdd(payload.balanceSnapshots)

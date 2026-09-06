@@ -20,6 +20,8 @@ export type {
   DebtType,
   EncryptedBackupEnvelope,
   Payment,
+  PayLaterPayment,
+  PayLaterPlan,
   PlainBackupEnvelope,
   PlanSettings,
   Scenario
