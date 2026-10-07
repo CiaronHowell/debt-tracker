@@ -9,6 +9,7 @@ test('records a payment, reconciles the balance, and confirms the updated active
     const url = new URL(request.url());
     if (url.hostname !== '127.0.0.1') externalRequests.push(request.url());
   });
+  await page.clock.setFixedTime(new Date('2026-08-28T09:00:00'));
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue to debts' }).click();
@@ -68,4 +69,37 @@ test('records a payment, reconciles the balance, and confirms the updated active
 
   expect(await new AxeBuilder({ page }).analyze()).toMatchObject({ violations: [] });
   expect(externalRequests).toEqual([]);
+});
+
+test('shows the current month of an active plan that started in an earlier month', async ({
+  page
+}) => {
+  await page.clock.setFixedTime(new Date('2026-10-07T09:00:00'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Continue to debts' }).click();
+
+  await page.getByLabel('Debt name').fill('Small card');
+  await page.getByLabel(/Current balance/).fill('100.00');
+  await page.getByLabel(/APR/).fill('0');
+  await page.getByLabel(/Minimum payment/).fill('25.00');
+  await page.getByRole('button', { name: 'Save debt' }).click();
+
+  await page.getByRole('button', { name: 'Add another debt' }).click();
+  await page.getByLabel('Debt name').fill('Large loan');
+  await page.getByLabel(/Current balance/).fill('500.00');
+  await page.getByLabel(/APR/).fill('0');
+  await page.getByLabel(/Minimum payment/).fill('50.00');
+  await page.getByRole('button', { name: 'Save debt' }).click();
+
+  await page.getByRole('button', { name: 'Continue to budget' }).click();
+  await page.getByLabel('Plan start month').fill('2026-08');
+  await page.getByLabel('Total monthly debt budget').fill('150.00');
+  await page.getByRole('button', { name: 'Review my plan' }).click();
+  await page.getByRole('button', { name: 'Make this my plan' }).click();
+
+  // August pays off Small card; by October the whole budget goes to Large loan.
+  await expect(page.getByRole('heading', { name: 'Pay £150.00 to Large loan' })).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Other minimum payments' }).getByText('October 2026')
+  ).toBeVisible();
 });

@@ -13,6 +13,7 @@ import { moneyMinorSchema, parsePlanSettings, yearMonthSchema } from '$lib/persi
 import { runWriteTransaction } from '$lib/persistence/transactions';
 import { AppError, persistenceWriteError } from './errors';
 import { comparePlanProjections, type PlanProjectionComparison } from './plan-comparison';
+import { planStartMonth } from './plan-workspace';
 import { resolveDependencies, type ServiceDependencies } from './service-utils';
 import { validateInput } from './validation';
 
@@ -28,6 +29,8 @@ export interface ActivePlanReview {
   scenario: Scenario;
   activeProjection: PlanProjection;
   currentProjection: PlanProjection | null;
+  /** Start month for a replacement plan generated from current balances. */
+  currentStartMonth: string;
   currentFailure: CalculationFailure | null;
   isStale: boolean;
   comparison: PlanProjectionComparison | null;
@@ -122,7 +125,7 @@ export class PlanService {
     return calculateScenarioProjection(settings, scenario);
   }
 
-  async getActivePlanReview(): Promise<ActivePlanReview | null> {
+  async getActivePlanReview(currentMonth?: string): Promise<ActivePlanReview | null> {
     const settings = await this.repositories.planSettings.primary();
     if (!settings?.activeScenarioId) return null;
     const scenario = await this.repositories.scenarios.get(settings.activeScenarioId);
@@ -139,12 +142,16 @@ export class PlanService {
       scenarioFingerprint(currentDebts)
     ]);
     const isStale = savedFingerprint !== currentFingerprint;
+    const currentStartMonth = currentMonth
+      ? planStartMonth(scenario.startMonth, currentMonth)
+      : scenario.startMonth;
 
     if (!isStale) {
       return {
         scenario,
         activeProjection,
         currentProjection: activeProjection,
+        currentStartMonth,
         currentFailure: null,
         isStale: false,
         comparison: null
@@ -153,7 +160,7 @@ export class PlanService {
 
     const currentResult = calculatePlan({
       currency: settings.currency,
-      startMonth: scenario.startMonth,
+      startMonth: currentStartMonth,
       monthlyBudgetMinor: scenario.monthlyBudgetMinor,
       algorithm: scenario.algorithm,
       debts: currentDebts,
@@ -164,6 +171,7 @@ export class PlanService {
         scenario,
         activeProjection,
         currentProjection: null,
+        currentStartMonth,
         currentFailure: currentResult,
         isStale: true,
         comparison: null
@@ -174,6 +182,7 @@ export class PlanService {
       scenario,
       activeProjection,
       currentProjection: currentResult,
+      currentStartMonth,
       currentFailure: null,
       isStale: true,
       comparison: comparePlanProjections(activeProjection, currentResult)

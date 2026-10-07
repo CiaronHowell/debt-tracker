@@ -15,7 +15,10 @@ export {
   budgetForExtra,
   extraPaymentForBudget,
   minimumPaymentTotal,
-  paginateRows
+  paginateRows,
+  planStartMonth,
+  projectionMonthFor,
+  upcomingMilestones
 } from './plan-workspace';
 export {
   comparePlanProjections,

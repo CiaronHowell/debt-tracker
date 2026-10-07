@@ -26,12 +26,19 @@
     PayLaterService,
     PlanService,
     ScenarioService,
+    projectionMonthFor,
+    upcomingMilestones,
     type ActivePlanReview,
     type PayLaterSummary
   } from '$lib/application';
   import { getDatabase, getPersistenceMode, type Debt, type Payment } from '$lib/persistence';
   import type { Currency } from '$lib/domain';
-  import { currentLocalDate, formatCalendarDate, formatYearMonth } from '$lib/utils/dates';
+  import {
+    currentLocalDate,
+    currentLocalMonth,
+    formatCalendarDate,
+    formatYearMonth
+  } from '$lib/utils/dates';
   import { formatMoney } from '$lib/utils/money';
   import { explainPlanChanges } from '$lib/utils/plan-explanations';
 
@@ -44,6 +51,7 @@
   const scenarioService = new ScenarioService(database);
 
   let review = $state<ActivePlanReview | null>(null);
+  let currentMonth = $state(currentLocalMonth());
   let payLaterSummary = $state<PayLaterSummary | null>(null);
   let debts = $state<Debt[]>([]);
   let recentPayments = $state<Payment[]>([]);
@@ -65,20 +73,24 @@
       ? review.currentProjection
       : (review?.activeProjection ?? null)
   );
-  let firstMonth = $derived(displayProjection?.months[0] ?? null);
+  let planMonth = $derived(
+    displayProjection ? projectionMonthFor(displayProjection, currentMonth) : null
+  );
   let target = $derived.by(() => {
-    if (!firstMonth?.targetDebtId) return null;
-    return firstMonth.debts.find((debt) => debt.debtId === firstMonth?.targetDebtId) ?? null;
+    if (!planMonth?.targetDebtId) return null;
+    return planMonth.debts.find((debt) => debt.debtId === planMonth?.targetDebtId) ?? null;
   });
   let otherMinimums = $derived(
-    firstMonth?.debts.filter(
-      (debt) => debt.debtId !== firstMonth?.targetDebtId && debt.requiredPaymentMinor > 0
+    planMonth?.debts.filter(
+      (debt) => debt.debtId !== planMonth?.targetDebtId && debt.requiredPaymentMinor > 0
     ) ?? []
   );
   let totalDebtMinor = $derived(debts.reduce((total, debt) => total + debt.currentBalanceMinor, 0));
-  let nextMilestone = $derived(displayProjection?.milestones[0] ?? null);
+  let nextMilestone = $derived(
+    displayProjection ? (upcomingMilestones(displayProjection, currentMonth)[0] ?? null) : null
+  );
   let suggestedAmounts = $derived.by(() =>
-    Object.fromEntries(firstMonth?.debts.map((debt) => [debt.debtId, debt.paymentMinor]) ?? [])
+    Object.fromEntries(planMonth?.debts.map((debt) => [debt.debtId, debt.paymentMinor]) ?? [])
   );
   let explanations = $derived(
     review?.comparison ? explainPlanChanges(review.comparison, currency) : []
@@ -92,8 +104,9 @@
   async function loadData(initial = false): Promise<void> {
     if (initial) loading = true;
     error = '';
+    currentMonth = currentLocalMonth();
     const [planReview, activeDebts, history, settings, commitments] = await Promise.all([
-      planService.getActivePlanReview(),
+      planService.getActivePlanReview(currentMonth),
       debtService.listActive(),
       paymentService.history(),
       planService.getSettings(),
@@ -166,7 +179,7 @@
       await scenarioService.createAndActivate({
         name: 'Updated payment plan',
         monthlyBudgetMinor: review.scenario.monthlyBudgetMinor,
-        startMonth: review.scenario.startMonth,
+        startMonth: review.currentStartMonth,
         algorithm: review.scenario.algorithm,
         sourceScenarioId: review.scenario.id
       });
@@ -370,7 +383,7 @@
           <p class="eyebrow">Also this month</p>
           <h2 id="other-payments-title">Other minimum payments</h2>
         </div>
-        <span>{formatYearMonth(firstMonth?.month ?? displayProjection.startMonth)}</span>
+        <span>{formatYearMonth(planMonth?.month ?? displayProjection.startMonth)}</span>
       </div>
       {#if otherMinimums.length}
         <ul class="minimum-payment-list">

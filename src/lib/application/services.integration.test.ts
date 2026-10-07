@@ -229,6 +229,55 @@ describe('transactional application services', () => {
     });
     await expect(planService.getActivePlanReview()).resolves.toMatchObject({ isStale: false });
   });
+
+  it('regenerates a stale plan from the current month rather than the saved start month', async () => {
+    const database = createDatabase('payment-review-later-month');
+    const debtService = new DebtService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('debt-1', 'setup-snapshot-1')
+    });
+    await debtService.create(debtInput);
+    const planService = new PlanService(database, { now: () => FIXED_NOW });
+    await planService.saveSettings({
+      currency: 'GBP',
+      startMonth: '2026-08',
+      monthlyBudgetMinor: 5_000
+    });
+    const scenarioService = new ScenarioService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('scenario-1')
+    });
+    await scenarioService.createAndActivate({
+      name: 'Primary plan',
+      monthlyBudgetMinor: 5_000,
+      startMonth: '2026-08'
+    });
+
+    await expect(planService.getActivePlanReview('2026-10')).resolves.toMatchObject({
+      isStale: false,
+      currentStartMonth: '2026-10',
+      activeProjection: { startMonth: '2026-08' }
+    });
+
+    const paymentService = new PaymentService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('payment-1', 'payment-snapshot-1')
+    });
+    await paymentService.record({
+      debtId: 'debt-1',
+      amountMinor: 2_500,
+      paidOn: '2026-10-02',
+      note: ''
+    });
+
+    const review = await planService.getActivePlanReview('2026-10');
+    expect(review).toMatchObject({
+      isStale: true,
+      currentStartMonth: '2026-10',
+      currentProjection: { startMonth: '2026-10', totalStartingBalanceMinor: 7_500 }
+    });
+    expect(review?.currentProjection?.months[0]?.month).toBe('2026-10');
+  });
 });
 
 describe('scenario workspace services', () => {
