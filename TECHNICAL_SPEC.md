@@ -817,7 +817,7 @@ The architecture should permit, but the MVP must not prematurely implement:
 
 - Avalanche and custom payoff ordering.
 - Recurring and one-off extra payments.
-- Variable APR schedules and promotional expiry dates.
+- Multiple promotional periods and lender-specific deferred-interest calculations.
 - Daily interest models.
 - Optional cloud synchronization through repository adapters.
 - Shared household plans.
@@ -834,3 +834,27 @@ The implemented domain contract extends the abbreviated interfaces above with th
 - `PlanProjection.minimumOnlyComparison` contains the available comparison metrics or a typed `NON_CONVERGING_DEBT` reason.
 
 These additions do not change persisted v1 data requirements: omitted `balanceSource` is treated as user-entered, and `previousPayoffOrder` is calculation context rather than persisted scenario data.
+
+## 18. Post-MVP extension — Pay later commitments
+
+Pay-later purchases are tracked independently from core debts and saved scenarios. They must never enter `Scenario.debtSnapshot`, contribute to core minimum payments, change `PlanSettings.monthlyBudgetMinor`, or receive snowball overpayments.
+
+Persist two additive entity types:
+
+- `PayLaterPlan`: name, starting/current balance, purchase date, payment deadline, optional APR if the deadline is missed, notes, and archive timestamps.
+- `PayLaterPayment`: plan identifier, amount/date/note, balance before and after, and creation timestamp.
+
+For each active plan, calculate a separate monthly target using integer minor units:
+
+```text
+payment months remaining = calendar months from the current month through the deadline month, inclusive
+monthly target = ceil(current balance / payment months remaining)
+```
+
+The exact deadline date remains authoritative: an unpaid plan becomes overdue only after that date. Compare the current target with the baseline target across the original purchase-to-deadline term to identify catch-up plans. A paid plan has a zero target. An overdue plan presents its full outstanding balance for immediate review.
+
+The optional missed-deadline APR is warning context only. The application must not claim to calculate lender-specific or retrospectively charged interest without the full contract terms.
+
+The dedicated `/pay-later` workspace provides totals, a separate monthly allocation, deadline/progress states, add/edit/archive controls, and payment recording. Home presents the allocation as a secondary action explicitly labelled as separate from the core debt budget.
+
+IndexedDB version 3 adds independent `payLaterPlans` and `payLaterPayments` stores. Backup format version 1 remains compatible through optional additive arrays that default to empty when importing older backups. New exports and transactional restore/rollback include both stores.

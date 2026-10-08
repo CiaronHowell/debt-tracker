@@ -30,11 +30,12 @@
     extraPaymentForBudget,
     minimumPaymentTotal,
     paginateRows,
+    planStartMonth,
     type SavedScenarioView
   } from '$lib/application';
   import type { CalculationFailure, Currency, PayoffAlgorithm, PlanProjection } from '$lib/domain';
   import { getDatabase, getPersistenceMode, type PlanSettings } from '$lib/persistence';
-  import { formatYearMonth } from '$lib/utils/dates';
+  import { currentLocalMonth, formatYearMonth } from '$lib/utils/dates';
   import { formatMoney, formatMoneyInput, parseMoneyInput } from '$lib/utils/money';
 
   const PAGE_SIZE = 24;
@@ -43,6 +44,12 @@
   const memoryOnly = getPersistenceMode() === 'memory';
   const planService = new PlanService(database);
   const scenarioService = new ScenarioService(database);
+
+  // Drafts snapshot today's balances, so they start no earlier than the current month.
+  function draftStartMonth(scenarioStartMonth: string): string {
+    return planStartMonth(scenarioStartMonth, currentLocalMonth());
+  }
+
   type ActivationMode = 'selected' | 'draft';
 
   let plans = $state<SavedScenarioView[]>([]);
@@ -170,7 +177,7 @@
     try {
       const result = await scenarioService.preview({
         monthlyBudgetMinor: budgetMinor,
-        startMonth: selected.scenario.startMonth,
+        startMonth: draftStartMonth(selected.scenario.startMonth),
         algorithm: draftAlgorithm
       });
       if (result.status === 'success') {
@@ -249,7 +256,7 @@
       const scenario = await scenarioService.create({
         name,
         monthlyBudgetMinor: parseMoneyInput(budgetInput)!,
-        startMonth: selected.scenario.startMonth,
+        startMonth: draftStartMonth(selected.scenario.startMonth),
         algorithm: draftAlgorithm,
         sourceScenarioId: selected.scenario.id
       });
@@ -300,7 +307,7 @@
           : await scenarioService.createAndActivate({
               name: scenarioName.trim() || 'Alternative plan',
               monthlyBudgetMinor: parseMoneyInput(budgetInput)!,
-              startMonth: selected.scenario.startMonth,
+              startMonth: draftStartMonth(selected.scenario.startMonth),
               algorithm: draftAlgorithm,
               sourceScenarioId: selected.scenario.id
             });

@@ -1,7 +1,14 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
-  import { ChartNoAxesCombined, CircleGauge, Home, Settings, WalletCards } from '@lucide/svelte';
+  import {
+    CalendarClock,
+    ChartNoAxesCombined,
+    CircleGauge,
+    Home,
+    Settings,
+    WalletCards
+  } from '@lucide/svelte';
   import SaveStatus from '$lib/components/shared/SaveStatus.svelte';
   import UpdatePrompt from '$lib/components/shared/UpdatePrompt.svelte';
 
@@ -11,6 +18,7 @@
     { href: '/', label: 'Home', icon: Home },
     { href: '/debts', label: 'Debts', icon: WalletCards },
     { href: '/plan', label: 'Plan', icon: ChartNoAxesCombined },
+    { href: '/pay-later', label: 'Pay later', icon: CalendarClock },
     { href: '/settings', label: 'Settings', icon: Settings }
   ] as const;
 

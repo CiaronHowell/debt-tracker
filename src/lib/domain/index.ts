@@ -38,3 +38,10 @@ export {
   calculateMonthlyInterestForPeriod
 } from './money';
 export { compareDebtInputs, sortDebtInputs } from './ordering';
+
+export {
+  calculatePayLaterSchedule,
+  type PayLaterSchedule,
+  type PayLaterScheduleInput,
+  type PayLaterScheduleStatus
+} from './pay-later';

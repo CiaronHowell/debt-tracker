@@ -32,6 +32,7 @@ test('completes the primary flow on mobile and audits every main route', async (
     { path: '/', name: 'Home' },
     { path: '/debts', name: 'Debts' },
     { path: '/plan', name: 'Plan' },
+    { path: '/pay-later', name: 'Pay later' },
     { path: '/settings', name: 'Settings' },
     { path: '/privacy', name: 'Privacy' }
   ] as const;

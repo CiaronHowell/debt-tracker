@@ -49,6 +49,8 @@ describe('DebtTrackerDatabase', () => {
       'appMeta',
       'balanceSnapshots',
       'debts',
+      'payLaterPayments',
+      'payLaterPlans',
       'payments',
       'planSettings',
       'scenarios'
@@ -128,7 +130,7 @@ describe('DebtTrackerDatabase', () => {
     await expect(database.scenarios.get('scenario-1')).resolves.toMatchObject({
       debtSnapshot: [expect.objectContaining({ promotionalAprEndsOn: null })]
     });
-    await expect(database.appMeta.get('schema-version')).resolves.toMatchObject({ value: 2 });
+    await expect(database.appMeta.get('schema-version')).resolves.toMatchObject({ value: 3 });
   });
 
   it('rolls back every entity and metadata write when a command fails', async () => {

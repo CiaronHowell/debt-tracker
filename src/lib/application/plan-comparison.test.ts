@@ -75,4 +75,43 @@ describe('comparePlanProjections', () => {
       nextTarget: { debtId: 'debt-2', name: 'Loan' }
     });
   });
+
+  it('compares a later-starting plan against the remaining months of the previous plan', () => {
+    const base = projection();
+    const august = base.months[0]!;
+    const previous = projection({
+      totalInterestMinor: 300,
+      months: [
+        { ...august, totalInterestMinor: 100 },
+        {
+          ...august,
+          month: '2026-09',
+          totalInterestMinor: 100,
+          targetDebtId: 'debt-2',
+          debts: [{ ...august.debts[0]!, debtId: 'debt-2', name: 'Loan' }]
+        },
+        { ...august, month: '2026-10', totalInterestMinor: 100 }
+      ]
+    });
+    const next = projection({
+      startMonth: '2026-09',
+      totalInterestMinor: 150,
+      months: [
+        {
+          ...august,
+          month: '2026-09',
+          totalInterestMinor: 150,
+          targetDebtId: 'debt-2',
+          debts: [{ ...august.debts[0]!, debtId: 'debt-2', name: 'Loan' }]
+        }
+      ]
+    });
+
+    expect(comparePlanProjections(previous, next)).toMatchObject({
+      previousInterestMinor: 200,
+      interestDeltaMinor: -50,
+      targetChanged: false,
+      previousTarget: { debtId: 'debt-2', name: 'Loan' }
+    });
+  });
 });

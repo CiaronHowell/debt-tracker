@@ -1,4 +1,5 @@
-import { monthsBetween, type PlanProjection } from '$lib/domain';
+import { compareYearMonths, monthsBetween, type PlanProjection } from '$lib/domain';
+import { projectionMonthFor } from './plan-workspace';
 
 export interface PlanTargetSummary {
   debtId: string;
@@ -21,19 +22,29 @@ export interface PlanProjectionComparison {
   hasIncompleteInterest: boolean;
 }
 
-function firstTarget(projection: PlanProjection): PlanTargetSummary | null {
-  const firstMonth = projection.months[0];
-  if (!firstMonth?.targetDebtId) return null;
-  const target = firstMonth.debts.find((debt) => debt.debtId === firstMonth.targetDebtId);
+function targetFor(projection: PlanProjection, month: string): PlanTargetSummary | null {
+  const row = projectionMonthFor(projection, month);
+  if (!row?.targetDebtId) return null;
+  const target = row.debts.find((debt) => debt.debtId === row.targetDebtId);
   return target ? { debtId: target.debtId, name: target.name } : null;
+}
+
+function interestFrom(projection: PlanProjection, month: string): number {
+  if (compareYearMonths(month, projection.startMonth) <= 0) return projection.totalInterestMinor;
+  return projection.months
+    .filter((row) => compareYearMonths(row.month, month) >= 0)
+    .reduce((total, row) => total + row.totalInterestMinor, 0);
 }
 
 export function comparePlanProjections(
   previous: PlanProjection,
   next: PlanProjection
 ): PlanProjectionComparison {
-  const previousTarget = firstTarget(previous);
-  const nextTarget = firstTarget(next);
+  // The next plan may start later than the previous one (regenerated in a later month), so
+  // compare targets and remaining interest from the next plan's start month.
+  const previousTarget = targetFor(previous, next.startMonth);
+  const nextTarget = targetFor(next, next.startMonth);
+  const previousInterestMinor = interestFrom(previous, next.startMonth);
   const payoffOrderChanged =
     previous.payoffOrder.length !== next.payoffOrder.length ||
     previous.payoffOrder.some((debtId, index) => debtId !== next.payoffOrder[index]);
@@ -42,9 +53,9 @@ export function comparePlanProjections(
     previousDebtFreeMonth: previous.debtFreeMonth,
     nextDebtFreeMonth: next.debtFreeMonth,
     debtFreeMonthDelta: monthsBetween(previous.debtFreeMonth, next.debtFreeMonth),
-    previousInterestMinor: previous.totalInterestMinor,
+    previousInterestMinor,
     nextInterestMinor: next.totalInterestMinor,
-    interestDeltaMinor: next.totalInterestMinor - previous.totalInterestMinor,
+    interestDeltaMinor: next.totalInterestMinor - previousInterestMinor,
     previousPayoffOrder: [...previous.payoffOrder],
     nextPayoffOrder: [...next.payoffOrder],
     payoffOrderChanged,

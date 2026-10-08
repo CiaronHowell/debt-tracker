@@ -1,11 +1,22 @@
 import type { EntityTable, IDType } from 'dexie';
 import type { DebtTrackerDatabase } from '../db';
-import type { AppMeta, BalanceSnapshot, Debt, Payment, PlanSettings, Scenario } from '../models';
+import type {
+  AppMeta,
+  BalanceSnapshot,
+  Debt,
+  Payment,
+  PayLaterPayment,
+  PayLaterPlan,
+  PlanSettings,
+  Scenario
+} from '../models';
 import {
   parseAppMeta,
   parseBalanceSnapshot,
   parseDebt,
   parsePayment,
+  parsePayLaterPayment,
+  parsePayLaterPlan,
   parsePlanSettings,
   parseScenario
 } from '../schemas';
@@ -82,6 +93,33 @@ export class PaymentRepository extends EntityRepository<Payment, 'id'> {
   }
 }
 
+export class PayLaterPlanRepository extends EntityRepository<PayLaterPlan, 'id'> {
+  constructor(table: EntityTable<PayLaterPlan, 'id'>) {
+    super(table, parsePayLaterPlan);
+  }
+
+  async active(): Promise<PayLaterPlan[]> {
+    const plans = await this.all();
+    return plans
+      .filter((plan) => plan.archivedAt === null)
+      .sort((left, right) => {
+        const byDeadline = left.deadlineDate.localeCompare(right.deadlineDate);
+        return byDeadline !== 0 ? byDeadline : left.id.localeCompare(right.id);
+      });
+  }
+}
+
+export class PayLaterPaymentRepository extends EntityRepository<PayLaterPayment, 'id'> {
+  constructor(table: EntityTable<PayLaterPayment, 'id'>) {
+    super(table, parsePayLaterPayment);
+  }
+
+  async forPlan(planId: string): Promise<PayLaterPayment[]> {
+    const payments = await this.table.where('planId').equals(planId).sortBy('paidOn');
+    return payments.map(parsePayLaterPayment);
+  }
+}
+
 export class BalanceSnapshotRepository extends EntityRepository<BalanceSnapshot, 'id'> {
   constructor(table: EntityTable<BalanceSnapshot, 'id'>) {
     super(table, parseBalanceSnapshot);
@@ -99,6 +137,8 @@ export interface Repositories {
   planSettings: PlanSettingsRepository;
   scenarios: ScenarioRepository;
   payments: PaymentRepository;
+  payLaterPlans: PayLaterPlanRepository;
+  payLaterPayments: PayLaterPaymentRepository;
   balanceSnapshots: BalanceSnapshotRepository;
   appMeta: AppMetaRepository;
 }
@@ -109,6 +149,8 @@ export function createRepositories(database: DebtTrackerDatabase): Repositories 
     planSettings: new PlanSettingsRepository(database.planSettings),
     scenarios: new ScenarioRepository(database.scenarios),
     payments: new PaymentRepository(database.payments),
+    payLaterPlans: new PayLaterPlanRepository(database.payLaterPlans),
+    payLaterPayments: new PayLaterPaymentRepository(database.payLaterPayments),
     balanceSnapshots: new BalanceSnapshotRepository(database.balanceSnapshots),
     appMeta: new AppMetaRepository(database.appMeta)
   };

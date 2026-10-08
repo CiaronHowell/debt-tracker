@@ -3,6 +3,7 @@
   import { onMount, tick } from 'svelte';
   import {
     ArrowRight,
+    CalendarClock,
     CalendarDays,
     CheckCircle2,
     CreditCard,
@@ -22,13 +23,22 @@
   import {
     DebtService,
     PaymentService,
+    PayLaterService,
     PlanService,
     ScenarioService,
-    type ActivePlanReview
+    projectionMonthFor,
+    upcomingMilestones,
+    type ActivePlanReview,
+    type PayLaterSummary
   } from '$lib/application';
   import { getDatabase, getPersistenceMode, type Debt, type Payment } from '$lib/persistence';
   import type { Currency } from '$lib/domain';
-  import { formatCalendarDate, formatYearMonth } from '$lib/utils/dates';
+  import {
+    currentLocalDate,
+    currentLocalMonth,
+    formatCalendarDate,
+    formatYearMonth
+  } from '$lib/utils/dates';
   import { formatMoney } from '$lib/utils/money';
   import { explainPlanChanges } from '$lib/utils/plan-explanations';
 
@@ -36,10 +46,13 @@
   const memoryOnly = getPersistenceMode() === 'memory';
   const debtService = new DebtService(database);
   const paymentService = new PaymentService(database);
+  const payLaterService = new PayLaterService(database);
   const planService = new PlanService(database);
   const scenarioService = new ScenarioService(database);
 
   let review = $state<ActivePlanReview | null>(null);
+  let currentMonth = $state(currentLocalMonth());
+  let payLaterSummary = $state<PayLaterSummary | null>(null);
   let debts = $state<Debt[]>([]);
   let recentPayments = $state<Payment[]>([]);
   let totalPaidMinor = $state(0);
@@ -60,20 +73,24 @@
       ? review.currentProjection
       : (review?.activeProjection ?? null)
   );
-  let firstMonth = $derived(displayProjection?.months[0] ?? null);
+  let planMonth = $derived(
+    displayProjection ? projectionMonthFor(displayProjection, currentMonth) : null
+  );
   let target = $derived.by(() => {
-    if (!firstMonth?.targetDebtId) return null;
-    return firstMonth.debts.find((debt) => debt.debtId === firstMonth?.targetDebtId) ?? null;
+    if (!planMonth?.targetDebtId) return null;
+    return planMonth.debts.find((debt) => debt.debtId === planMonth?.targetDebtId) ?? null;
   });
   let otherMinimums = $derived(
-    firstMonth?.debts.filter(
-      (debt) => debt.debtId !== firstMonth?.targetDebtId && debt.requiredPaymentMinor > 0
+    planMonth?.debts.filter(
+      (debt) => debt.debtId !== planMonth?.targetDebtId && debt.requiredPaymentMinor > 0
     ) ?? []
   );
   let totalDebtMinor = $derived(debts.reduce((total, debt) => total + debt.currentBalanceMinor, 0));
-  let nextMilestone = $derived(displayProjection?.milestones[0] ?? null);
+  let nextMilestone = $derived(
+    displayProjection ? (upcomingMilestones(displayProjection, currentMonth)[0] ?? null) : null
+  );
   let suggestedAmounts = $derived.by(() =>
-    Object.fromEntries(firstMonth?.debts.map((debt) => [debt.debtId, debt.paymentMinor]) ?? [])
+    Object.fromEntries(planMonth?.debts.map((debt) => [debt.debtId, debt.paymentMinor]) ?? [])
   );
   let explanations = $derived(
     review?.comparison ? explainPlanChanges(review.comparison, currency) : []
@@ -87,13 +104,16 @@
   async function loadData(initial = false): Promise<void> {
     if (initial) loading = true;
     error = '';
-    const [planReview, activeDebts, history, settings] = await Promise.all([
-      planService.getActivePlanReview(),
+    currentMonth = currentLocalMonth();
+    const [planReview, activeDebts, history, settings, commitments] = await Promise.all([
+      planService.getActivePlanReview(currentMonth),
       debtService.listActive(),
       paymentService.history(),
-      planService.getSettings()
+      planService.getSettings(),
+      payLaterService.summary(currentLocalDate())
     ]);
     review = planReview;
+    payLaterSummary = commitments;
     debts = activeDebts;
     recentPayments = history.recent;
     totalPaidMinor = history.totalPaidMinor;
@@ -159,7 +179,7 @@
       await scenarioService.createAndActivate({
         name: 'Updated payment plan',
         monthlyBudgetMinor: review.scenario.monthlyBudgetMinor,
-        startMonth: review.scenario.startMonth,
+        startMonth: review.currentStartMonth,
         algorithm: review.scenario.algorithm,
         sourceScenarioId: review.scenario.id
       });
@@ -333,13 +353,37 @@
     {#if error}<p class="form-error" role="alert">{error}</p>{/if}
     {#if statusMessage}<p class="success-message" role="status">{statusMessage}</p>{/if}
 
+    {#if payLaterSummary && payLaterSummary.plans.length > 0}
+      <section class="pay-later-home-card" aria-labelledby="pay-later-home-title">
+        <span class="pay-later-home-icon"><CalendarClock size={23} aria-hidden="true" /></span>
+        <div>
+          <p class="eyebrow">Pay later — separate from your debt plan</p>
+          <h2 id="pay-later-home-title">
+            Set aside {formatMoney(payLaterSummary.monthlyAllocationMinor, currency)} this month
+          </h2>
+          <p>
+            Across {payLaterSummary.plans.length} pay-later
+            {payLaterSummary.plans.length === 1 ? 'plan' : 'plans'}. This does not change your core
+            debt budget.
+          </p>
+          {#if payLaterSummary.overdueCount > 0}
+            <span class="pay-later-home-warning">
+              {payLaterSummary.overdueCount}
+              {payLaterSummary.overdueCount === 1 ? 'plan is' : 'plans are'} past the payment deadline.
+            </span>
+          {/if}
+        </div>
+        <a class="button secondary" href={resolve('/pay-later')}>View pay-later plans</a>
+      </section>
+    {/if}
+
     <section class="home-section" aria-labelledby="other-payments-title">
       <div class="section-heading">
         <div>
           <p class="eyebrow">Also this month</p>
           <h2 id="other-payments-title">Other minimum payments</h2>
         </div>
-        <span>{formatYearMonth(firstMonth?.month ?? displayProjection.startMonth)}</span>
+        <span>{formatYearMonth(planMonth?.month ?? displayProjection.startMonth)}</span>
       </div>
       {#if otherMinimums.length}
         <ul class="minimum-payment-list">

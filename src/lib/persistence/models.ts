@@ -56,6 +56,31 @@ export interface Payment {
   createdAt: string;
 }
 
+export interface PayLaterPlan {
+  id: string;
+  name: string;
+  startingBalanceMinor: MoneyMinor;
+  currentBalanceMinor: MoneyMinor;
+  purchaseDate: string;
+  deadlineDate: string;
+  missedDeadlineAprBasisPoints: number | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface PayLaterPayment {
+  id: string;
+  planId: string;
+  amountMinor: MoneyMinor;
+  paidOn: string;
+  note: string;
+  balanceBeforeMinor: MoneyMinor;
+  balanceAfterMinor: MoneyMinor;
+  createdAt: string;
+}
+
 export interface BalanceSnapshot {
   id: string;
   debtId: string;
@@ -76,6 +101,8 @@ export interface BackupPayload {
   planSettings: PlanSettings[];
   scenarios: Scenario[];
   payments: Payment[];
+  payLaterPlans: PayLaterPlan[];
+  payLaterPayments: PayLaterPayment[];
   balanceSnapshots: BalanceSnapshot[];
   appMeta: AppMeta[];
 }
