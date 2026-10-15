@@ -399,4 +399,6 @@
     </p>
     <a href={resolve('/privacy')}>Read privacy information</a>
   </section>
+
+  <p class="field-help"><a href={resolve('/account')}>Owner sync</a></p>
 </div>

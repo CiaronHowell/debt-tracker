@@ -3193,3 +3193,20 @@ main {
     width: 100%;
   }
 }
+
+/* Owner cloud sync */
+.topbar-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.sync-status {
+  text-decoration: none;
+}
+
+.sidebar-privacy .sync-status {
+  display: flex;
+  margin-top: 0.35rem;
+}
