@@ -33,6 +33,15 @@ export {
   type SavedScenarioView
 } from './scenario-service';
 export type { ServiceDependencies } from './service-utils';
+export { decideSync, type SyncAction } from './sync-decision';
+export {
+  SyncService,
+  SYNC_STATE_STORAGE_KEY,
+  type ConflictChoice,
+  type SyncConflict,
+  type SyncOutcome,
+  type SyncState
+} from './sync-service';
 
 export {
   PayLaterService,

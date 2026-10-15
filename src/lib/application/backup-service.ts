@@ -254,6 +254,38 @@ function previewFor(decoded: DecodedBackup): BackupPreview {
   };
 }
 
+async function encryptEnvelope(
+  plain: PlainBackupEnvelope,
+  passphrase: string
+): Promise<EncryptedBackupEnvelope> {
+  try {
+    const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
+    const key = await deriveEncryptionKey(passphrase, salt, ['encrypt']);
+    const plaintext = new TextEncoder().encode(JSON.stringify(plain));
+    const ciphertext = await globalThis.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      plaintext
+    );
+    return {
+      format: 'debt-tracker-backup-encrypted',
+      version: BACKUP_VERSION,
+      exportedAt: plain.exportedAt,
+      encryption: {
+        algorithm: 'AES-256-GCM',
+        keyDerivation: 'PBKDF2-HMAC-SHA-256',
+        iterations: PBKDF2_ITERATIONS,
+        salt: encodeBase64(salt),
+        iv: encodeBase64(iv)
+      },
+      ciphertext: encodeBase64(new Uint8Array(ciphertext))
+    };
+  } catch (error) {
+    throw new AppError('EXPORT_FAILED', 'The encrypted backup could not be created.', {}, error);
+  }
+}
+
 export class BackupService {
   private readonly dependencies: ServiceDependencies;
   private readonly allTables: Table[];
@@ -335,34 +367,30 @@ export class BackupService {
 
   async exportEncrypted(passphrase: string): Promise<EncryptedBackupEnvelope> {
     const validPassphrase = validatePassphrase(passphrase);
-    const plain = await this.exportPlain();
+    return encryptEnvelope(await this.exportPlain(), validPassphrase);
+  }
 
+  /**
+   * Encrypts the current data without stamping export or write metadata, so sync
+   * uploads are not themselves mistaken for local changes.
+   */
+  async exportEncryptedSnapshot(passphrase: string): Promise<EncryptedBackupEnvelope> {
+    const validPassphrase = validatePassphrase(passphrase);
+    let plain: PlainBackupEnvelope;
     try {
-      const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-      const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
-      const key = await deriveEncryptionKey(validPassphrase, salt, ['encrypt']);
-      const plaintext = new TextEncoder().encode(JSON.stringify(plain));
-      const ciphertext = await globalThis.crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        plaintext
+      plain = await this.database.transaction('r', this.allTables, async () =>
+        parsePlainBackupEnvelope({
+          format: 'debt-tracker-backup',
+          version: BACKUP_VERSION,
+          exportedAt: this.dependencies.now(),
+          payload: validatePayloadRelations(await this.readPayload())
+        })
       );
-      return {
-        format: 'debt-tracker-backup-encrypted',
-        version: BACKUP_VERSION,
-        exportedAt: plain.exportedAt,
-        encryption: {
-          algorithm: 'AES-256-GCM',
-          keyDerivation: 'PBKDF2-HMAC-SHA-256',
-          iterations: PBKDF2_ITERATIONS,
-          salt: encodeBase64(salt),
-          iv: encodeBase64(iv)
-        },
-        ciphertext: encodeBase64(new Uint8Array(ciphertext))
-      };
     } catch (error) {
-      throw new AppError('EXPORT_FAILED', 'The encrypted backup could not be created.', {}, error);
+      if (error instanceof AppError) throw error;
+      throw new AppError('EXPORT_FAILED', 'The backup could not be created. Try again.', {}, error);
     }
+    return encryptEnvelope(plain, validPassphrase);
   }
 
   serialize(envelope: BackupEnvelope): string {

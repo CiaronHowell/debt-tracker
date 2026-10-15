@@ -7,7 +7,12 @@ export type AppErrorCode =
   | 'IMPORT_INVALID'
   | 'IMPORT_UNSUPPORTED_VERSION'
   | 'IMPORT_DECRYPTION_FAILED'
-  | 'EXPORT_FAILED';
+  | 'EXPORT_FAILED'
+  | 'SYNC_UNAUTHORIZED'
+  | 'SYNC_LOCKED'
+  | 'SYNC_CONFLICT'
+  | 'SYNC_PASSPHRASE_INVALID'
+  | 'SYNC_NETWORK';
 
 export class AppError extends Error {
   readonly code: AppErrorCode;
