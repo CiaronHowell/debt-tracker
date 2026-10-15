@@ -5,12 +5,15 @@
     CalendarClock,
     ChartNoAxesCombined,
     CircleGauge,
+    Cloud,
     Home,
     Settings,
     WalletCards
   } from '@lucide/svelte';
   import SaveStatus from '$lib/components/shared/SaveStatus.svelte';
+  import SyncStatus from '$lib/components/shared/SyncStatus.svelte';
   import UpdatePrompt from '$lib/components/shared/UpdatePrompt.svelte';
+  import { syncController } from '$lib/sync/sync-controller.svelte';
 
   let { children } = $props();
 
@@ -52,7 +55,12 @@
 
     <div class="sidebar-privacy">
       <SaveStatus compact />
-      <p>Your financial data never leaves this browser.</p>
+      <SyncStatus compact />
+      <p>
+        {syncController.enabled
+          ? 'Your data is encrypted on this device before it syncs.'
+          : 'Your financial data never leaves this browser.'}
+      </p>
     </div>
   </aside>
 
@@ -62,13 +70,37 @@
         <CircleGauge size={21} aria-hidden="true" />
         <span>Debt Tracker</span>
       </a>
-      <SaveStatus />
+      <div class="topbar-status">
+        <SaveStatus />
+        <SyncStatus />
+      </div>
     </header>
 
     <UpdatePrompt />
 
+    {#if syncController.remoteChangesApplied}
+      <div class="system-notices">
+        <section class="system-notice update-notice" role="status" aria-live="polite">
+          <Cloud size={19} aria-hidden="true" />
+          <div>
+            <strong>Changes synced from another device</strong>
+            <span>Refresh this view to see the latest data.</span>
+          </div>
+          <button
+            class="button secondary"
+            type="button"
+            onclick={() => syncController.refreshView()}
+          >
+            Refresh view
+          </button>
+        </section>
+      </div>
+    {/if}
+
     <main id="main-content" tabindex="-1">
-      {@render children()}
+      {#key syncController.viewVersion}
+        {@render children()}
+      {/key}
     </main>
   </div>
 

@@ -631,7 +631,7 @@ A failed import must leave existing data unchanged. MVP supports replace-only im
 
 ## 10. Security and privacy
 
-- No backend, account, analytics, advertising, or telemetry.
+- No backend, account, analytics, advertising, or telemetry, except the owner-only sync described in §19, which public visitors never contact.
 - No third-party runtime scripts, fonts, images, or API calls.
 - Configure a restrictive Content Security Policy compatible with the static application.
 - Escape user content through framework rendering; do not render notes as HTML.
@@ -819,7 +819,6 @@ The architecture should permit, but the MVP must not prematurely implement:
 - Recurring and one-off extra payments.
 - Multiple promotional periods and lender-specific deferred-interest calculations.
 - Daily interest models.
-- Optional cloud synchronization through repository adapters.
 - Shared household plans.
 - Additional currency minor-unit rules.
 - CSV export of amortization schedules.
@@ -858,3 +857,40 @@ The optional missed-deadline APR is warning context only. The application must n
 The dedicated `/pay-later` workspace provides totals, a separate monthly allocation, deadline/progress states, add/edit/archive controls, and payment recording. Home presents the allocation as a secondary action explicitly labelled as separate from the core debt budget.
 
 IndexedDB version 3 adds independent `payLaterPlans` and `payLaterPayments` stores. Backup format version 1 remains compatible through optional additive arrays that default to empty when importing older backups. New exports and transactional restore/rollback include both stores.
+
+## 19. Post-MVP extension — Owner-only cloud sync
+
+A single allowlisted owner can sync their data between devices. Every other visitor keeps the local-only behaviour of §10, unchanged, and makes no requests to the sync API.
+
+- **Hosting.** `adapter-vercel` (runtime `nodejs24.x`). Pages stay prerendered with `ssr = false`. Only `src/routes/api/**/+server.ts` are functions. All calls are same-origin, so the CSP is unchanged. The service worker never handles `/api/`.
+- **Authentication.** GitHub OAuth (`/api/auth/login`, `/api/auth/callback`) with no scopes.
+  - The callback compares the numeric GitHub id with `GITHUB_ALLOWED_USER_ID`. Any other account is redirected to `/account?denied` without a session.
+  - The session is an HMAC-SHA256-signed, httpOnly, SameSite=Lax cookie (`dt_session`, 30 days).
+  - Every sync request re-checks the allowlist. Mutating requests must be `application/json`.
+- **Encryption.** The browser uploads only the existing encrypted backup envelope (§9; PBKDF2-SHA-256 600,000 iterations → AES-256-GCM).
+  - Sync exports use `BackupService.exportEncryptedSnapshot`, which does not stamp `last-export-at` or `last-successful-write-at`.
+  - The sync passphrase is held in memory only and is re-entered after a reload. A new device verifies it by decrypting the cloud copy.
+- **Storage.** A private Vercel Blob store holds append-only revisions at `sync/rev-<9-digit revision>.json` (`{ revision, updatedAt, envelope }`).
+  - A revision is written with `allowOverwrite: false`, so two concurrent writers cannot both create the same revision.
+  - The latest 10 revisions are kept.
+- **Protocol.**
+  - `GET /api/sync[?meta=1]` returns `{ revision, updatedAt, envelope }`, or revision 0 when nothing has been uploaded.
+  - `PUT /api/sync { baseRevision, envelope }` writes `baseRevision + 1`. It returns `409 { revision }` if the head has moved.
+- **Device state.** `localStorage['debt-tracker:sync'] = { baseRevision, syncedWriteAt }`. It is never stored in IndexedDB or backups. Its presence is what enables sync on the device.
+  - A device is dirty when `appMeta['last-successful-write-at']` differs from `syncedWriteAt`.
+- **Decision** (`decideSync`):
+
+  | Situation                                            | Result   |
+  | ---------------------------------------------------- | -------- |
+  | Remote and base unchanged, nothing local             | noop     |
+  | Only local changed                                   | push     |
+  | Only remote changed                                  | pull     |
+  | Both changed                                         | conflict |
+  | Cloud empty                                          | push     |
+  | Never-synced device with local data, cloud not empty | conflict |
+  | Never-synced device without data, cloud not empty    | pull     |
+
+  A conflict never overwrites anything automatically. The owner chooses **Keep this device's data** (force push) or **Use cloud copy** (transactional replace via `importBackup`).
+
+- **Triggers.** Sync runs on unlock, about 2 s after a successful local write, and on window focus and `online`.
+  - A background pull shows a "Refresh view" notice, which re-mounts the current page without losing the unlocked passphrase.

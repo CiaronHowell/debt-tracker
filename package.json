@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "1.35.0",
+    "@vercel/blob": "2.8.2",
     "dexie": "4.4.5",
     "fake-indexeddb": "6.2.5",
     "zod": "4.4.3"
@@ -33,7 +34,7 @@
     "@axe-core/playwright": "4.13.0",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.62.1",
-    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/adapter-vercel": "6.3.4",
     "@sveltejs/kit": "2.70.3",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
     "@testing-library/jest-dom": "7.0.1",
