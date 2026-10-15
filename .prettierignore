@@ -1,5 +1,6 @@
 .svelte-kit
 build
+.vercel
 coverage
 node_modules
 playwright-report

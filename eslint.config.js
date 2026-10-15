@@ -10,6 +10,7 @@ export default ts.config(
     ignores: [
       '.svelte-kit/**',
       'build/**',
+      '.vercel/**',
       'coverage/**',
       'node_modules/**',
       'playwright-report/**',
