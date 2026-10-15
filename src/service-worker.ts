@@ -38,6 +38,8 @@ worker.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== worker.location.origin) return;
+  // Owner sync and auth endpoints must always hit the network, never the app-shell fallback.
+  if (url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(
