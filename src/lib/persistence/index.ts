@@ -1,5 +1,10 @@
 export { DebtTrackerDatabase, closeDatabase, getDatabase } from './db';
 export {
+  DEVICE_DATABASE_NAME,
+  IndexedDbDevicePassphraseStore,
+  type DevicePassphraseStore
+} from './device-passphrase';
+export {
   PERSISTENCE_WRITE_ERROR_EVENT,
   PERSISTENCE_WRITE_START_EVENT,
   PERSISTENCE_WRITE_SUCCESS_EVENT

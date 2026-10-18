@@ -14,6 +14,7 @@
   let remoteRevision = $state(0);
   let passphrase = $state('');
   let passphraseConfirmation = $state('');
+  let remember = $state(false);
   let working = $state(false);
   let errorMessage = $state('');
 
@@ -38,6 +39,7 @@
       login = session.login;
       if (session.authenticated) {
         syncController.enable();
+        await syncController.ready();
         if (!syncController.unlocked)
           remoteRevision = await syncController.sync.getRemoteRevision();
       }
@@ -62,7 +64,7 @@
     }
     working = true;
     try {
-      await syncController.unlock(passphrase);
+      await syncController.unlock(passphrase, remember);
       passphrase = '';
       passphraseConfirmation = '';
     } catch (error) {
@@ -181,8 +183,18 @@
           <p class="field-help">
             {firstUpload
               ? 'Choose a passphrase to encrypt your cloud copy. It is never sent or stored, and cannot be recovered.'
-              : 'Enter the passphrase you chose when you first synced. It stays in memory until you reload.'}
+              : 'Enter the passphrase you chose when you first synced. It stays in memory until you reload, unless you remember this device.'}
           </p>
+          {#if syncController.canRemember}
+            <label class="remember-device">
+              <input type="checkbox" bind:checked={remember} aria-describedby="remember-help" />
+              Remember this device
+            </label>
+            <p class="field-help" id="remember-help">
+              Unlock automatically after a reload. Anyone who can use this browser profile could
+              then sync your data.
+            </p>
+          {/if}
           <button class="button primary" type="submit" disabled={working}>
             <LockKeyhole size={17} aria-hidden="true" />
             {working ? 'Unlocking…' : firstUpload ? 'Encrypt and upload' : 'Unlock and sync'}
@@ -226,6 +238,9 @@
           </div>
         </div>
       {:else}
+        {#if syncController.remembered}
+          <p class="field-help">This device remembers your passphrase. Lock to forget it.</p>
+        {/if}
         <div class="backup-actions">
           <button
             class="button primary"

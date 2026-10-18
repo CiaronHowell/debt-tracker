@@ -24,9 +24,12 @@ class SyncController {
   /** Set when a background pull replaced local data the current page may have rendered. */
   remoteChangesApplied = $state(false);
   unlocked = $state(false);
+  /** Whether this device keeps the passphrase between reloads. */
+  remembered = $state(false);
 
   private service: SyncService | undefined;
   private listening = false;
+  private resuming: Promise<void> | null = null;
   private running: Promise<void> | null = null;
   private rerun = false;
   private debounce: ReturnType<typeof setTimeout> | undefined;
@@ -40,12 +43,17 @@ class SyncController {
     return this.status !== 'disabled';
   }
 
+  get canRemember(): boolean {
+    return this.sync.canRemember();
+  }
+
   start(): void {
     if (typeof window === 'undefined' || !this.sync.isEnabled()) {
       this.status = 'disabled';
       return;
     }
     if (!this.sync.isUnlocked()) this.status = 'locked';
+    this.resuming ??= this.resume();
     if (this.listening) return;
     this.listening = true;
     window.addEventListener(PERSISTENCE_WRITE_SUCCESS_EVENT, () => this.schedule());
@@ -58,17 +66,24 @@ class SyncController {
     this.start();
   }
 
-  async unlock(passphrase: string): Promise<{ remoteExists: boolean }> {
-    const result = await this.sync.unlock(passphrase);
+  /** Resolves once a remembered passphrase, if any, has unlocked sync (before it syncs). */
+  ready(): Promise<void> {
+    return this.resuming ?? Promise.resolve();
+  }
+
+  async unlock(passphrase: string, remember = false): Promise<{ remoteExists: boolean }> {
+    const result = await this.sync.unlock(passphrase, { remember });
     this.unlocked = true;
+    this.remembered = remember;
     this.status = 'syncing';
     await this.syncNow({ background: false });
     return result;
   }
 
-  lock(): void {
-    this.sync.lock();
+  async lock(): Promise<void> {
+    await this.sync.lock();
     this.unlocked = false;
+    this.remembered = false;
     if (this.status !== 'disabled') this.status = 'locked';
   }
 
@@ -109,6 +124,7 @@ class SyncController {
       await this.sync.signOut();
     } finally {
       this.unlocked = false;
+      this.remembered = false;
       this.status = 'disabled';
       this.conflict = null;
       this.lastSyncedAt = null;
@@ -122,6 +138,17 @@ class SyncController {
   refreshView(): void {
     this.remoteChangesApplied = false;
     this.viewVersion += 1;
+  }
+
+  private async resume(): Promise<void> {
+    try {
+      if (!(await this.sync.resume())) return;
+    } catch {
+      return; // An unreadable remembered passphrase just leaves sync locked.
+    }
+    this.unlocked = true;
+    this.remembered = true;
+    void this.syncNow();
   }
 
   private schedule(delay = WRITE_DEBOUNCE_MS): void {
@@ -160,6 +187,11 @@ class SyncController {
         this.status = 'signed-out';
         break;
       case 'SYNC_LOCKED':
+        this.status = 'locked';
+        break;
+      case 'SYNC_PASSPHRASE_INVALID':
+        this.unlocked = false;
+        this.remembered = false;
         this.status = 'locked';
         break;
       case 'SYNC_NETWORK':
