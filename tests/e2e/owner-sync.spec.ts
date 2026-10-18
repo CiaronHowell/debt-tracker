@@ -82,3 +82,47 @@ test('the owner can unlock sync and see its status across the app', async ({ pag
   await expect(page.getByRole('link', { name: 'Owner sync' })).toBeVisible();
   expect(apiRequests).toEqual([]);
 });
+
+test('a remembered device unlocks itself after a reload until it is locked', async ({ page }) => {
+  await page.route('**/api/auth/session', (route) =>
+    route.fulfill({ json: { authenticated: true, login: 'owner' } })
+  );
+  await page.route('**/api/sync**', (route) =>
+    route.fulfill({ json: { revision: 0, updatedAt: null, envelope: null } })
+  );
+  const remembered = page.getByText('This device remembers your passphrase. Lock to forget it.');
+
+  async function unlock(remember: boolean): Promise<void> {
+    await page.getByLabel('Sync passphrase').fill('owner passphrase');
+    await page.getByLabel('Confirm passphrase').fill('owner passphrase');
+    await page.getByLabel('Remember this device').setChecked(remember);
+    await page.getByRole('button', { name: 'Encrypt and upload' }).click();
+    await expect(page.getByTestId('sync-status')).toHaveText('Synced');
+  }
+
+  await page.goto('/account');
+  await unlock(false);
+  await expect(remembered).toBeHidden();
+
+  // Not remembered: a reload asks for the passphrase again.
+  await page.reload();
+  await expect(page.getByLabel('Sync passphrase')).toBeVisible();
+
+  await unlock(true);
+  await expect(remembered).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId('sync-status')).toHaveText('Synced');
+  await expect(remembered).toBeVisible();
+  await expect(page.getByLabel('Sync passphrase')).toBeHidden();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+
+  // Locking forgets the passphrase, so the next reload asks again.
+  await page.getByRole('button', { name: 'Lock', exact: true }).click();
+  await expect(page.getByLabel('Sync passphrase')).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('sync-status')).toHaveText('Locked');
+  await expect(page.getByLabel('Sync passphrase')).toBeVisible();
+});

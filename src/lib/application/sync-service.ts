@@ -1,5 +1,9 @@
 import type { DebtTrackerDatabase } from '$lib/persistence/db';
 import {
+  IndexedDbDevicePassphraseStore,
+  type DevicePassphraseStore
+} from '$lib/persistence/device-passphrase';
+import {
   conflictResultSchema,
   LOGOUT_API_PATH,
   pushResultSchema,
@@ -26,6 +30,8 @@ export interface SyncState {
 export interface SyncDependencies {
   fetch: typeof globalThis.fetch;
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+  /** Where "Remember this device" keeps the passphrase between reloads. */
+  passphraseStore: DevicePassphraseStore;
 }
 
 export interface SyncConflict {
@@ -57,7 +63,8 @@ export class SyncService {
     this.backups = new BackupService(database);
     this.dependencies = {
       fetch: dependencies.fetch ?? ((...args) => globalThis.fetch(...args)),
-      storage: dependencies.storage ?? globalThis.localStorage
+      storage: dependencies.storage ?? globalThis.localStorage,
+      passphraseStore: dependencies.passphraseStore ?? new IndexedDbDevicePassphraseStore()
     };
   }
 
@@ -69,6 +76,10 @@ export class SyncService {
     return this.passphrase !== null;
   }
 
+  canRemember(): boolean {
+    return this.dependencies.passphraseStore.isAvailable();
+  }
+
   getState(): SyncState | null {
     return this.readState();
   }
@@ -78,13 +89,25 @@ export class SyncService {
     if (!this.readState()) this.writeState({ baseRevision: null, syncedWriteAt: null });
   }
 
-  disable(): void {
+  async disable(): Promise<void> {
     this.passphrase = null;
     this.dependencies.storage.removeItem(SYNC_STATE_STORAGE_KEY);
+    await this.dependencies.passphraseStore.clear();
   }
 
-  lock(): void {
+  /** Drops the passphrase from memory and forgets it if this device remembered it. */
+  async lock(): Promise<void> {
     this.passphrase = null;
+    await this.dependencies.passphraseStore.clear();
+  }
+
+  /** Unlocks with a passphrase remembered on this device. Returns whether it did. */
+  async resume(): Promise<boolean> {
+    if (this.passphrase !== null || !this.isEnabled()) return false;
+    const passphrase = await this.dependencies.passphraseStore.load();
+    if (passphrase === null) return false;
+    this.passphrase = passphrase;
+    return true;
   }
 
   async getSession(): Promise<SessionResult> {
@@ -96,7 +119,7 @@ export class SyncService {
     try {
       await this.request(LOGOUT_API_PATH, { method: 'POST', body: '{}' });
     } finally {
-      this.disable();
+      await this.disable();
     }
   }
 
@@ -105,7 +128,10 @@ export class SyncService {
   }
 
   /** Returns whether the cloud already holds data (i.e. the passphrase was verified against it). */
-  async unlock(passphrase: string): Promise<{ remoteExists: boolean }> {
+  async unlock(
+    passphrase: string,
+    { remember = false }: { remember?: boolean } = {}
+  ): Promise<{ remoteExists: boolean }> {
     const remote = await this.fetchRemote(false);
     if (remote.envelope) {
       try {
@@ -118,6 +144,17 @@ export class SyncService {
           error
         );
       }
+    }
+    try {
+      if (remember) await this.dependencies.passphraseStore.save(passphrase);
+      else await this.dependencies.passphraseStore.clear();
+    } catch (error) {
+      throw new AppError(
+        'PERSISTENCE_WRITE_FAILED',
+        'This device could not remember your passphrase. Try again without remembering it.',
+        {},
+        error
+      );
     }
     this.passphrase = passphrase;
     return { remoteExists: remote.envelope !== null };
@@ -193,15 +230,17 @@ export class SyncService {
   private async pull(passphrase: string): Promise<number> {
     const remote = await this.fetchRemote(false);
     if (!remote.envelope) return remote.revision;
-    await this.backups.importBackup(remote.envelope, passphrase);
+    const envelope = remote.envelope;
+    await this.decryptRemote(() => this.backups.importBackup(envelope, passphrase));
     this.writeState({ baseRevision: remote.revision, syncedWriteAt: await this.lastWriteAt() });
     return remote.revision;
   }
 
   private async describeConflict(passphrase: string): Promise<SyncConflict> {
     const remote = await this.fetchRemote(false);
-    const preview = remote.envelope
-      ? await this.backups.preview(remote.envelope, passphrase)
+    const envelope = remote.envelope;
+    const preview = envelope
+      ? await this.decryptRemote(() => this.backups.preview(envelope, passphrase))
       : null;
     const [debts, scenarios, payments, payLaterPlans, payLaterPayments, balanceSnapshots] =
       await Promise.all([
@@ -225,6 +264,25 @@ export class SyncService {
       },
       local: { debts, scenarios, payments, payLaterPlans, payLaterPayments, balanceSnapshots }
     };
+  }
+
+  /**
+   * A passphrase verified earlier (or remembered) stops working if another device re-seeded an
+   * emptied cloud with a different one. Lock instead of retrying it on every sync.
+   */
+  private async decryptRemote<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== 'IMPORT_DECRYPTION_FAILED') throw error;
+      await this.lock();
+      throw new AppError(
+        'SYNC_PASSPHRASE_INVALID',
+        'Your passphrase no longer decrypts the cloud copy. Enter it again.',
+        {},
+        error
+      );
+    }
   }
 
   private async fetchRemote(metaOnly: boolean): Promise<RemoteState> {

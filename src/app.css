@@ -2656,6 +2656,23 @@ main {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
 }
 
+.backup-form .remember-device {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+}
+
+.backup-form .remember-device input {
+  width: 1.1rem;
+  height: 1.1rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
 .field-help {
   margin: 0;
   color: var(--text-soft);

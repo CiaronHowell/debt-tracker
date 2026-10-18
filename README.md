@@ -30,7 +30,7 @@ For everyone else, all financial data remains in the browser: the app makes no b
 
 ### Owner-only cloud sync
 
-One GitHub account (the owner) can sign in on `/account` to sync an end-to-end encrypted copy of the data between devices. The server only ever stores AES-256-GCM ciphertext produced in the browser from the owner's sync passphrase. That passphrase is never sent to the server or persisted.
+One GitHub account (the owner) can sign in on `/account` to sync an end-to-end encrypted copy of the data between devices. The server only ever stores AES-256-GCM ciphertext produced in the browser from the owner's sync passphrase. That passphrase is never sent to the server. It is only kept on a device if the owner chooses **Remember this device**, and then only encrypted with a browser key that can't be extracted.
 
 1. Create a GitHub OAuth app with the callback URL `https://<your-domain>/api/auth/callback`. Create a second OAuth app for local development with the callback `http://localhost:5173/api/auth/callback`.
 2. In Vercel, create a **private** Blob store and connect it to the project. This sets `BLOB_READ_WRITE_TOKEN`.

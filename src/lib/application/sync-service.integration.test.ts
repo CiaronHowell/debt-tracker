@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { DebtTrackerDatabase } from '$lib/persistence/db';
+import type { DevicePassphraseStore } from '$lib/persistence/device-passphrase';
 import { MemorySyncStore } from '$lib/server/memory-sync-store';
 import { pushRemoteState, readRemoteState } from '$lib/server/sync-handlers';
 import { LOGOUT_API_PATH, SESSION_API_PATH, SYNC_API_PATH } from '$lib/sync/protocol';
@@ -21,6 +22,22 @@ function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => void values.set(key, value),
     removeItem: (key) => void values.delete(key)
+  };
+}
+
+function memoryPassphraseStore(): DevicePassphraseStore & { stored: string | null } {
+  return {
+    stored: null,
+    isAvailable: () => true,
+    async load() {
+      return this.stored;
+    },
+    async save(passphrase) {
+      this.stored = passphrase;
+    },
+    async clear() {
+      this.stored = null;
+    }
   };
 }
 
@@ -50,13 +67,17 @@ function createDevice(cloud: ReturnType<typeof createCloud>, label: string) {
   const database = new DebtTrackerDatabase(`debt-tracker-sync-${label}-${crypto.randomUUID()}`);
   databases.push(database);
   const storage = memoryStorage();
-  const sync = new SyncService(database, { fetch: cloud.fetch, storage });
+  const passphraseStore = memoryPassphraseStore();
+  const sync = new SyncService(database, { fetch: cloud.fetch, storage, passphraseStore });
   sync.enable();
   const debts = new DebtService(database, { now: tick });
   return {
     database,
     storage,
+    passphraseStore,
     sync,
+    /** A fresh service on the same device, as after a page reload. */
+    reload: () => new SyncService(database, { fetch: cloud.fetch, storage, passphraseStore }),
     addDebt: (name: string) =>
       debts.create({
         name,
@@ -181,6 +202,68 @@ describe('SyncService', { timeout: 60_000 }, () => {
     expect(await tablet.debtNames()).toEqual(['Tablet-only debt']);
   });
 
+  it('remembers the passphrase across a reload only when asked', async () => {
+    const cloud = createCloud();
+    const laptop = createDevice(cloud, 'laptop');
+    await laptop.addDebt('Visa');
+
+    await laptop.sync.unlock(PASSPHRASE);
+    await laptop.sync.sync();
+    expect(laptop.passphraseStore.stored).toBeNull();
+    await expect(laptop.reload().resume()).resolves.toBe(false);
+
+    await laptop.sync.lock();
+    await laptop.sync.unlock(PASSPHRASE, { remember: true });
+    const reloaded = laptop.reload();
+    expect(reloaded.isUnlocked()).toBe(false);
+    await expect(reloaded.resume()).resolves.toBe(true);
+    expect(reloaded.isUnlocked()).toBe(true);
+    await expect(reloaded.sync()).resolves.toEqual({ action: 'noop', revision: 1 });
+
+    await laptop.addDebt('Loan');
+    await expect(reloaded.sync()).resolves.toEqual({ action: 'push', revision: 2 });
+  });
+
+  it('forgets a remembered passphrase on lock and on disable', async () => {
+    const device = createDevice(createCloud(), 'forget');
+
+    await device.sync.unlock(PASSPHRASE, { remember: true });
+    await device.sync.lock();
+    expect(device.passphraseStore.stored).toBeNull();
+    await expect(device.reload().resume()).resolves.toBe(false);
+
+    await device.sync.unlock(PASSPHRASE, { remember: true });
+    await device.sync.disable();
+    expect(device.passphraseStore.stored).toBeNull();
+    // A disabled device never resumes, even if something was left behind.
+    await device.passphraseStore.save(PASSPHRASE);
+    await expect(device.reload().resume()).resolves.toBe(false);
+  });
+
+  it('locks a remembered passphrase that no longer decrypts the cloud copy', async () => {
+    const cloud = createCloud();
+    const laptop = createDevice(cloud, 'laptop');
+    await laptop.addDebt('Visa');
+    await laptop.sync.unlock(PASSPHRASE, { remember: true });
+    await laptop.sync.sync();
+
+    // The cloud is emptied and re-seeded from another device with a different passphrase.
+    cloud.store.revisions.clear();
+    const phone = createDevice(cloud, 'phone');
+    await phone.addDebt('Loan');
+    await phone.sync.unlock('a different passphrase');
+    await expect(phone.sync.sync()).resolves.toEqual({ action: 'push', revision: 1 });
+    await phone.addDebt('Store card');
+    await phone.sync.sync();
+
+    const reloaded = laptop.reload();
+    await expect(reloaded.resume()).resolves.toBe(true);
+    await expect(reloaded.sync()).rejects.toMatchObject({ code: 'SYNC_PASSPHRASE_INVALID' });
+    expect(reloaded.isUnlocked()).toBe(false);
+    expect(laptop.passphraseStore.stored).toBeNull();
+    expect(await laptop.debtNames()).toEqual(['Visa']);
+  });
+
   it('surfaces an expired sign-in and forgets device state on disable', async () => {
     const device = createDevice(createCloud({ authorized: false }), 'expired');
     await expect(device.sync.unlock(PASSPHRASE)).rejects.toMatchObject({
@@ -188,7 +271,7 @@ describe('SyncService', { timeout: 60_000 }, () => {
     });
 
     expect(device.storage.getItem(SYNC_STATE_STORAGE_KEY)).not.toBeNull();
-    device.sync.disable();
+    await device.sync.disable();
     expect(device.sync.isEnabled()).toBe(false);
     expect(device.storage.getItem(SYNC_STATE_STORAGE_KEY)).toBeNull();
   });

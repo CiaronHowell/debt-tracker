@@ -869,7 +869,9 @@ A single allowlisted owner can sync their data between devices. Every other visi
   - Every sync request re-checks the allowlist. Mutating requests must be `application/json`.
 - **Encryption.** The browser uploads only the existing encrypted backup envelope (§9; PBKDF2-SHA-256 600,000 iterations → AES-256-GCM).
   - Sync exports use `BackupService.exportEncryptedSnapshot`, which does not stamp `last-export-at` or `last-successful-write-at`.
-  - The sync passphrase is held in memory only and is re-entered after a reload. A new device verifies it by decrypting the cloud copy.
+  - The sync passphrase is held in memory only and is re-entered after a reload, unless the owner ticks **Remember this device** when unlocking. A new device verifies it by decrypting the cloud copy.
+  - A remembered passphrase is encrypted with a per-device, non-extractable AES-256-GCM `CryptoKey`. The key and ciphertext are stored in a separate IndexedDB database, `debt-tracker-device`, which never enters the data database or backups. The option is hidden when IndexedDB is unavailable.
+  - On reload, a remembered passphrase unlocks sync without re-verifying it. **Lock** and **Sign out** forget it. So does a later decryption failure of the cloud copy, which returns the device to locked.
 - **Storage.** A private Vercel Blob store holds append-only revisions at `sync/rev-<9-digit revision>.json` (`{ revision, updatedAt, envelope }`).
   - A revision is written with `allowOverwrite: false`, so two concurrent writers cannot both create the same revision.
   - The latest 10 revisions are kept.
@@ -892,5 +894,5 @@ A single allowlisted owner can sync their data between devices. Every other visi
 
   A conflict never overwrites anything automatically. The owner chooses **Keep this device's data** (force push) or **Use cloud copy** (transactional replace via `importBackup`).
 
-- **Triggers.** Sync runs on unlock, about 2 s after a successful local write, and on window focus and `online`.
+- **Triggers.** Sync runs on unlock (including a remembered unlock on reload), about 2 s after a successful local write, and on window focus and `online`.
   - A background pull shows a "Refresh view" notice, which re-mounts the current page without losing the unlocked passphrase.
