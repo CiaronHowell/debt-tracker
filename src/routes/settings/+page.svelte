@@ -18,6 +18,7 @@
     type PlanSettings
   } from '$lib/persistence';
   import { formatCalendarDate } from '$lib/utils/dates';
+  import { APP_VERSION } from '$lib/utils/version';
 
   const database = getDatabase();
   const backups = new BackupService(database);
@@ -400,5 +401,8 @@
     <a href={resolve('/privacy')}>Read privacy information</a>
   </section>
 
-  <p class="field-help"><a href={resolve('/account')}>Owner sync</a></p>
+  <p class="field-help">
+    <a href={resolve('/account')}>Owner sync</a> ·
+    <span data-testid="app-version">Version {APP_VERSION}</span>
+  </p>
 </div>

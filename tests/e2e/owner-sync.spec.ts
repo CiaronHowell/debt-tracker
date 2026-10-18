@@ -19,6 +19,7 @@ test('public visitors never contact the sync API', async ({ page }) => {
   }
 
   await expect(page.getByRole('link', { name: 'Owner sync' })).toBeVisible();
+  await expect(page.getByTestId('app-version')).toHaveText(/^Version \d+\.\d+\.\d+ \(\w+\)$/);
   await expect(page.getByText('Your financial data never leaves this browser.')).toBeVisible();
   expect(apiRequests).toEqual([]);
 });
