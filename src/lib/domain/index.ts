@@ -18,6 +18,7 @@ export type {
   ProjectionWarningCode,
   ScenarioDebtInput,
   SignedMoneyMinor,
+  StartMonthPayment,
   YearMonth
 } from './calculator.types';
 export {

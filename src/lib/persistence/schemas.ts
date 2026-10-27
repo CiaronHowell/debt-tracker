@@ -93,6 +93,11 @@ export const planSettingsSchema = z.strictObject({
   updatedAt: utcInstantSchema
 });
 
+export const startMonthPaymentSchema = z.strictObject({
+  debtId: identifierSchema,
+  amountMinor: positiveMoneyMinorSchema
+});
+
 export const scenarioSchema = z.strictObject({
   id: identifierSchema,
   name: z.string().trim().min(1).max(80),
@@ -100,6 +105,7 @@ export const scenarioSchema = z.strictObject({
   startMonth: yearMonthSchema,
   algorithm: z.enum(['snowball', 'deadline-aware']).default('snowball'),
   debtSnapshot: z.array(scenarioDebtInputSchema),
+  startMonthPayments: z.array(startMonthPaymentSchema).default([]),
   sourceScenarioId: identifierSchema.nullable(),
   createdAt: utcInstantSchema,
   updatedAt: utcInstantSchema

@@ -16,6 +16,12 @@ export interface ScenarioDebtInput {
   balanceSource?: 'user' | 'estimated';
 }
 
+/** A payment already made during the plan's first month, before the plan was calculated. */
+export interface StartMonthPayment {
+  debtId: string;
+  amountMinor: MoneyMinor;
+}
+
 export interface CalculatePlanInput {
   currency: Currency;
   startMonth: YearMonth;
@@ -24,6 +30,7 @@ export interface CalculatePlanInput {
   algorithm?: PayoffAlgorithm;
   maximumMonths?: number;
   previousPayoffOrder?: string[];
+  startMonthPayments?: StartMonthPayment[];
 }
 
 export type ProjectionWarningCode =

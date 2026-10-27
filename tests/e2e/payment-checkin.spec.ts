@@ -1,16 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-test('records a payment, reconciles the balance, and confirms the updated active plan', async ({
-  page
-}) => {
-  const externalRequests: string[] = [];
-  page.on('request', (request) => {
-    const url = new URL(request.url());
-    if (url.hostname !== '127.0.0.1') externalRequests.push(request.url());
-  });
-  await page.clock.setFixedTime(new Date('2026-08-28T09:00:00'));
-
+async function setUpTwoDebts(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue to debts' }).click();
 
@@ -32,6 +23,19 @@ test('records a payment, reconciles the balance, and confirms the updated active
   await page.getByLabel('Total monthly debt budget').fill('150.00');
   await page.getByRole('button', { name: 'Review my plan' }).click();
   await page.getByRole('button', { name: 'Make this my plan' }).click();
+}
+
+test('records a payment, reconciles the balance, and confirms the updated active plan', async ({
+  page
+}) => {
+  const externalRequests: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.hostname !== '127.0.0.1') externalRequests.push(request.url());
+  });
+  await page.clock.setFixedTime(new Date('2026-08-28T09:00:00'));
+
+  await setUpTwoDebts(page);
 
   await expect(page.getByRole('heading', { name: 'Pay £100.00 to Small card' })).toBeVisible();
   await expect(page.getByText('Large loan').first()).toBeVisible();
@@ -52,6 +56,9 @@ test('records a payment, reconciles the balance, and confirms the updated active
   await expect(review.getByText('Estimated balance after payment')).toBeVisible();
   await expect(review.getByText('£0.00')).toBeVisible();
   await expect(review.getByText('Your next target changed to Large loan.')).toBeVisible();
+  // £100 of the £150 budget is spent, so only Large loan's £50 minimum is left this month.
+  await expect(page.getByRole('heading', { name: 'Pay £50.00 to Large loan' })).toBeVisible();
+  await expect(page.getByText('£100.00 already paid this month.')).toBeVisible();
 
   await review.getByRole('button', { name: 'Enter statement balance' }).click();
   await review.getByLabel(/Statement balance/).fill('5.00');
@@ -62,40 +69,66 @@ test('records a payment, reconciles the balance, and confirms the updated active
   await expect(
     page.getByText('Your updated plan is now active and saved on this device.')
   ).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Pay £5.00 to Small card' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pay £50.00 to Large loan' })).toBeVisible();
+  await expect(page.getByText('This is the minimum payment still due this month.')).toBeVisible();
   await expect(page.getByText('£505.00')).toBeVisible();
   await expect(page.getByText('£100.00').last()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Recent payments' })).toBeVisible();
 
+  await page.getByRole('button', { name: 'Record payment' }).click();
+  await expect(paymentDialog.getByLabel('Debt').locator('option:checked')).toHaveText('Large loan');
+  await expect(paymentDialog.getByLabel(/Payment amount/)).toHaveValue('50.00');
+  await paymentDialog.getByRole('button', { name: 'Record payment' }).click();
+  await review.getByRole('button', { name: 'Use updated plan' }).click();
+
+  await expect(
+    page.getByRole('heading', { name: "You've made this month's planned payments" })
+  ).toBeVisible();
+  await expect(page.getByText('£150.00 already paid this month.')).toBeVisible();
+  await expect(page.getByText('Next month, pay £5.00 to Small card.')).toBeVisible();
+
   expect(await new AxeBuilder({ page }).analyze()).toMatchObject({ violations: [] });
+
+  await page.getByRole('link', { name: 'Plan', exact: true }).first().click();
+  await expect(page.getByText('1 saved plan')).toBeVisible();
   expect(externalRequests).toEqual([]);
+});
+
+test('removes a recorded payment and restores the plan', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-08-28T09:00:00'));
+  await setUpTwoDebts(page);
+
+  await page.getByRole('button', { name: 'Record payment' }).click();
+  const paymentDialog = page.getByRole('dialog', { name: 'Record a payment' });
+  await paymentDialog.getByLabel(/Payment amount/).fill('40.00');
+  await paymentDialog.getByRole('button', { name: 'Record payment' }).click();
+
+  const review = page.getByRole('region', { name: 'Review your updated plan' });
+  await expect(review).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pay £60.00 to Small card' })).toBeVisible();
+  await expect(page.getByText('£40.00 already paid this month.')).toBeVisible();
+
+  await page.getByRole('button', { name: /Remove £40\.00 payment to Small card/ }).click();
+  const confirmation = page.getByRole('dialog', { name: 'Remove this payment?' });
+  await expect(confirmation).toBeVisible();
+  expect(await new AxeBuilder({ page }).analyze()).toMatchObject({ violations: [] });
+  await confirmation.getByRole('button', { name: 'Remove payment' }).click();
+
+  await expect(
+    page.getByText("Payment removed. Small card's balance is back to £100.00.")
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pay £100.00 to Small card' })).toBeVisible();
+  await expect(review).toBeHidden();
+  await expect(page.getByText('already paid this month')).toBeHidden();
+  await expect(page.getByText('Your recorded payments will appear here.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record payment' })).toBeVisible();
 });
 
 test('shows the current month of an active plan that started in an earlier month', async ({
   page
 }) => {
   await page.clock.setFixedTime(new Date('2026-10-07T09:00:00'));
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Continue to debts' }).click();
-
-  await page.getByLabel('Debt name').fill('Small card');
-  await page.getByLabel(/Current balance/).fill('100.00');
-  await page.getByLabel(/APR/).fill('0');
-  await page.getByLabel(/Minimum payment/).fill('25.00');
-  await page.getByRole('button', { name: 'Save debt' }).click();
-
-  await page.getByRole('button', { name: 'Add another debt' }).click();
-  await page.getByLabel('Debt name').fill('Large loan');
-  await page.getByLabel(/Current balance/).fill('500.00');
-  await page.getByLabel(/APR/).fill('0');
-  await page.getByLabel(/Minimum payment/).fill('50.00');
-  await page.getByRole('button', { name: 'Save debt' }).click();
-
-  await page.getByRole('button', { name: 'Continue to budget' }).click();
-  await page.getByLabel('Plan start month').fill('2026-08');
-  await page.getByLabel('Total monthly debt budget').fill('150.00');
-  await page.getByRole('button', { name: 'Review my plan' }).click();
-  await page.getByRole('button', { name: 'Make this my plan' }).click();
+  await setUpTwoDebts(page);
 
   // August pays off Small card; by October the whole budget goes to Large loan.
   await expect(page.getByRole('heading', { name: 'Pay £150.00 to Large loan' })).toBeVisible();

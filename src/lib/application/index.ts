@@ -9,15 +9,18 @@ export { AppError, type AppErrorCode } from './errors';
 export {
   PaymentService,
   type PaymentHistorySummary,
+  type PaymentRemoval,
   type RecordPaymentInput
 } from './payment-service';
 export {
+  aggregateStartMonthPayments,
   budgetForExtra,
   extraPaymentForBudget,
   minimumPaymentTotal,
   paginateRows,
   planStartMonth,
   projectionMonthFor,
+  sameStartMonthPayments,
   upcomingMilestones
 } from './plan-workspace';
 export {

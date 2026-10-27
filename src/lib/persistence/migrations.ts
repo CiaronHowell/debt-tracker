@@ -2,7 +2,7 @@ import type Dexie from 'dexie';
 import type { Transaction } from 'dexie';
 import type { AppMeta, Debt, Scenario } from './models';
 
-export const DATABASE_VERSION = 3;
+export const DATABASE_VERSION = 4;
 export const DATABASE_NAME = 'debt-tracker';
 
 export const LEGACY_SCHEMA = {
@@ -83,9 +83,25 @@ async function migrateV2ToV3(transaction: Transaction): Promise<void> {
   });
 }
 
+async function migrateV3ToV4(transaction: Transaction): Promise<void> {
+  await transaction
+    .table<Scenario, string>('scenarios')
+    .toCollection()
+    .modify((scenario) => {
+      scenario.startMonthPayments ??= [];
+    });
+
+  await transaction.table<AppMeta, string>('appMeta').put({
+    key: 'schema-version',
+    value: DATABASE_VERSION,
+    updatedAt: new Date().toISOString()
+  });
+}
+
 export function configureMigrations(database: Dexie): void {
   database.version(0.9).stores(LEGACY_SCHEMA);
   database.version(1).stores(V1_SCHEMA).upgrade(migratePreReleaseToV1);
   database.version(2).stores(V1_SCHEMA).upgrade(migrateV1ToV2);
-  database.version(DATABASE_VERSION).stores(V3_SCHEMA).upgrade(migrateV2ToV3);
+  database.version(3).stores(V3_SCHEMA).upgrade(migrateV2ToV3);
+  database.version(DATABASE_VERSION).stores(V3_SCHEMA).upgrade(migrateV3ToV4);
 }

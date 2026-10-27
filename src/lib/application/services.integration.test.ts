@@ -210,6 +210,11 @@ describe('transactional application services', () => {
       scenario: { id: original.id },
       currentProjection: { totalStartingBalanceMinor: 7_500 }
     });
+    // £2,500 of August's £5,000 budget is already paid, so only £2,500 is left to plan.
+    expect(pending?.currentProjection?.months[0]).toMatchObject({
+      month: '2026-08',
+      totalPaymentMinor: 2_500
+    });
     await expect(database.planSettings.get('primary')).resolves.toMatchObject({
       activeScenarioId: original.id
     });
@@ -218,16 +223,20 @@ describe('transactional application services', () => {
       recent: [{ id: 'payment-1' }]
     });
 
-    const replacement = await scenarioService.createAndActivate({
-      name: 'Updated payment plan',
-      monthlyBudgetMinor: original.monthlyBudgetMinor,
-      startMonth: original.startMonth,
-      sourceScenarioId: original.id
+    const refreshed = await scenarioService.refresh(original.id, '2026-08');
+    expect(refreshed).toMatchObject({
+      id: original.id,
+      name: 'Primary plan',
+      startMonth: '2026-08',
+      startMonthPayments: [{ debtId: 'debt-1', amountMinor: 2_500 }]
     });
+    await expect(database.scenarios.count()).resolves.toBe(1);
     await expect(database.planSettings.get('primary')).resolves.toMatchObject({
-      activeScenarioId: replacement.id
+      activeScenarioId: original.id
     });
-    await expect(planService.getActivePlanReview()).resolves.toMatchObject({ isStale: false });
+    const accepted = await planService.getActivePlanReview('2026-08');
+    expect(accepted).toMatchObject({ isStale: false });
+    expect(accepted?.activeProjection.months[0]?.totalPaymentMinor).toBe(2_500);
   });
 
   it('regenerates a stale plan from the current month rather than the saved start month', async () => {
@@ -276,7 +285,194 @@ describe('transactional application services', () => {
       currentStartMonth: '2026-10',
       currentProjection: { startMonth: '2026-10', totalStartingBalanceMinor: 7_500 }
     });
-    expect(review?.currentProjection?.months[0]?.month).toBe('2026-10');
+    expect(review?.currentProjection?.months[0]).toMatchObject({
+      month: '2026-10',
+      totalPaymentMinor: 2_500
+    });
+  });
+
+  it('moves a refreshed active plan to the current month and counts its payments', async () => {
+    const database = createDatabase('refresh-current-month');
+    const debtService = new DebtService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('debt-1', 'setup-snapshot-1')
+    });
+    await debtService.create(debtInput);
+    const planService = new PlanService(database, { now: () => FIXED_NOW });
+    await planService.saveSettings({
+      currency: 'GBP',
+      startMonth: '2026-08',
+      monthlyBudgetMinor: 5_000
+    });
+    const scenarioService = new ScenarioService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('scenario-1', 'scenario-2')
+    });
+    const active = await scenarioService.createAndActivate({
+      name: 'Primary plan',
+      monthlyBudgetMinor: 5_000,
+      startMonth: '2026-08'
+    });
+    const alternative = await scenarioService.create({
+      name: 'Alternative plan',
+      monthlyBudgetMinor: 7_500,
+      startMonth: '2026-08'
+    });
+    const paymentService = new PaymentService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('payment-1', 'payment-snapshot-1')
+    });
+    await paymentService.record({
+      debtId: 'debt-1',
+      amountMinor: 2_500,
+      paidOn: '2026-10-02',
+      note: ''
+    });
+
+    await expect(scenarioService.refresh(active.id, '2026-10')).resolves.toMatchObject({
+      startMonth: '2026-10',
+      startMonthPayments: [{ debtId: 'debt-1', amountMinor: 2_500 }]
+    });
+    await expect(planService.getSettings()).resolves.toMatchObject({ startMonth: '2026-10' });
+
+    await expect(scenarioService.refresh(alternative.id, '2026-10')).resolves.toMatchObject({
+      startMonth: '2026-10'
+    });
+    await expect(planService.getSettings()).resolves.toMatchObject({
+      activeScenarioId: active.id,
+      monthlyBudgetMinor: 5_000
+    });
+  });
+});
+
+describe('payment removal', () => {
+  const EARLIER = '2026-08-28T07:00:00.000Z';
+  const LATER = '2026-08-29T08:00:00.000Z';
+
+  async function setUpRecordedPayment(label: string) {
+    const database = createDatabase(label);
+    await new DebtService(database, {
+      now: () => EARLIER,
+      createId: idSequence('debt-1', 'setup-snapshot-1')
+    }).create(debtInput);
+    const debtService = new DebtService(database, {
+      now: () => LATER,
+      createId: idSequence('statement-snapshot-1')
+    });
+    const planService = new PlanService(database, { now: () => FIXED_NOW });
+    await planService.saveSettings({
+      currency: 'GBP',
+      startMonth: '2026-08',
+      monthlyBudgetMinor: 5_000
+    });
+    const scenarioService = new ScenarioService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('scenario-1')
+    });
+    const scenario = await scenarioService.createAndActivate({
+      name: 'Primary plan',
+      monthlyBudgetMinor: 5_000,
+      startMonth: '2026-08'
+    });
+    const paymentService = new PaymentService(database, {
+      now: () => FIXED_NOW,
+      createId: idSequence('payment-1', 'payment-snapshot-1', 'payment-2', 'payment-snapshot-2')
+    });
+    await paymentService.record({
+      debtId: 'debt-1',
+      amountMinor: 2_500,
+      paidOn: '2026-08-30',
+      note: ''
+    });
+    return { database, debtService, planService, scenarioService, paymentService, scenario };
+  }
+
+  it('restores the balance and the original plan when the latest payment is removed', async () => {
+    const { database, planService, paymentService } = await setUpRecordedPayment('remove-undo');
+    await expect(planService.getActivePlanReview('2026-08')).resolves.toMatchObject({
+      isStale: true
+    });
+
+    await expect(paymentService.remove('payment-1')).resolves.toMatchObject({
+      payment: { id: 'payment-1' },
+      balanceRestored: true,
+      balanceAfterMinor: 10_000
+    });
+
+    await expect(database.debts.get('debt-1')).resolves.toMatchObject({
+      currentBalanceMinor: 10_000,
+      balanceAsOf: '2026-08-28',
+      balanceSource: 'user'
+    });
+    await expect(database.payments.count()).resolves.toBe(0);
+    await expect(database.balanceSnapshots.toArray()).resolves.toEqual([
+      expect.objectContaining({ id: 'setup-snapshot-1' })
+    ]);
+    await expect(planService.getActivePlanReview('2026-08')).resolves.toMatchObject({
+      isStale: false
+    });
+    await expect(paymentService.history()).resolves.toMatchObject({ totalPaidMinor: 0 });
+  });
+
+  it('adds back only the removed payment when later payments remain', async () => {
+    const { database, paymentService } = await setUpRecordedPayment('remove-earlier');
+    await paymentService.record({
+      debtId: 'debt-1',
+      amountMinor: 1_000,
+      paidOn: '2026-08-31',
+      note: ''
+    });
+
+    await expect(paymentService.remove('payment-1')).resolves.toMatchObject({
+      balanceRestored: true,
+      balanceAfterMinor: 9_000
+    });
+    await expect(database.debts.get('debt-1')).resolves.toMatchObject({
+      currentBalanceMinor: 9_000,
+      balanceAsOf: '2026-08-31',
+      balanceSource: 'estimated'
+    });
+    await expect(paymentService.paidInMonth('2026-08')).resolves.toEqual([
+      { debtId: 'debt-1', amountMinor: 1_000 }
+    ]);
+  });
+
+  it('keeps a statement balance entered after the removed payment', async () => {
+    const { database, debtService, planService, scenarioService, paymentService, scenario } =
+      await setUpRecordedPayment('remove-after-statement');
+    await debtService.reconcileBalance({
+      debtId: 'debt-1',
+      balanceMinor: 7_000,
+      recordedOn: '2026-08-31',
+      source: 'statement'
+    });
+    await scenarioService.refresh(scenario.id, '2026-08');
+    await expect(planService.getActivePlanReview('2026-08')).resolves.toMatchObject({
+      isStale: false
+    });
+
+    await expect(paymentService.remove('payment-1')).resolves.toMatchObject({
+      balanceRestored: false,
+      balanceAfterMinor: 7_000
+    });
+    await expect(database.debts.get('debt-1')).resolves.toMatchObject({
+      currentBalanceMinor: 7_000,
+      balanceSource: 'user'
+    });
+
+    // Balances are unchanged, but the plan no longer has the removed payment to count.
+    const review = await planService.getActivePlanReview('2026-08');
+    expect(review).toMatchObject({ isStale: true });
+    expect(review?.currentProjection?.months[0]?.totalPaymentMinor).toBe(5_000);
+  });
+
+  it('rejects removing a payment that does not exist', async () => {
+    const { paymentService } = await setUpRecordedPayment('remove-missing');
+
+    await expect(paymentService.remove('missing-payment')).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'This payment no longer exists.'
+    });
   });
 });
 

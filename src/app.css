@@ -353,6 +353,13 @@ main {
   font-size: clamp(1.25rem, 3vw, 1.65rem);
 }
 
+.action-copy .paid-this-month {
+  margin-bottom: 0.35rem;
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .action-copy p:last-child {
   max-width: 41rem;
   margin-bottom: 0;
@@ -1521,8 +1528,14 @@ main {
 }
 
 .minimum-payment-list strong,
-.payment-history-list > li > strong {
+.payment-history-actions strong {
   font-variant-numeric: tabular-nums;
+}
+
+.payment-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .payment-history-list li div strong,

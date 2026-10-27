@@ -91,6 +91,15 @@ export class PaymentRepository extends EntityRepository<Payment, 'id'> {
     const payments = await this.table.where('debtId').equals(debtId).sortBy('paidOn');
     return payments.map(parsePayment);
   }
+
+  /** Payments dated within a `YYYY-MM` month. */
+  async inMonth(month: string): Promise<Payment[]> {
+    const payments = await this.table
+      .where('paidOn')
+      .between(`${month}-01`, `${month}-31`, true, true)
+      .toArray();
+    return payments.map(parsePayment);
+  }
 }
 
 export class PayLaterPlanRepository extends EntityRepository<PayLaterPlan, 'id'> {
@@ -123,6 +132,11 @@ export class PayLaterPaymentRepository extends EntityRepository<PayLaterPayment,
 export class BalanceSnapshotRepository extends EntityRepository<BalanceSnapshot, 'id'> {
   constructor(table: EntityTable<BalanceSnapshot, 'id'>) {
     super(table, parseBalanceSnapshot);
+  }
+
+  async forDebt(debtId: string): Promise<BalanceSnapshot[]> {
+    const snapshots = await this.table.where('debtId').equals(debtId).toArray();
+    return snapshots.map(parseBalanceSnapshot);
   }
 }
 
