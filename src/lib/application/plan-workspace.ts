@@ -5,6 +5,7 @@ import {
   type MonthlyProjection,
   type PlanProjection,
   type ScenarioDebtInput,
+  type StartMonthPayment,
   type YearMonth
 } from '$lib/domain';
 import { checkedAdd, sumMoney } from '$lib/domain/money';
@@ -65,5 +66,34 @@ export function upcomingMilestones(
 ): DebtMilestone[] {
   return projection.milestones.filter(
     (milestone) => compareYearMonths(milestone.payoffMonth, month) >= 0
+  );
+}
+
+/** Totals recorded payments per debt, sorted by debt id so snapshots compare deterministically. */
+export function aggregateStartMonthPayments(
+  payments: readonly Pick<StartMonthPayment, 'debtId' | 'amountMinor'>[]
+): StartMonthPayment[] {
+  const totals = new Map<string, MoneyMinor>();
+  for (const payment of payments) {
+    totals.set(payment.debtId, checkedAdd(totals.get(payment.debtId) ?? 0, payment.amountMinor));
+  }
+  return [...totals]
+    .map(([debtId, amountMinor]) => ({ debtId, amountMinor }))
+    .sort((left, right) => left.debtId.localeCompare(right.debtId));
+}
+
+export function sameStartMonthPayments(
+  left: readonly StartMonthPayment[],
+  right: readonly StartMonthPayment[]
+): boolean {
+  const normalizedLeft = aggregateStartMonthPayments(left);
+  const normalizedRight = aggregateStartMonthPayments(right);
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every(
+      (payment, index) =>
+        payment.debtId === normalizedRight[index].debtId &&
+        payment.amountMinor === normalizedRight[index].amountMinor
+    )
   );
 }

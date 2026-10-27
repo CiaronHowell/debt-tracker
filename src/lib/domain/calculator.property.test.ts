@@ -84,4 +84,71 @@ describe('calculatePlan properties', () => {
       { numRuns: 150 }
     );
   });
+
+  it('never plans more than the unspent budget plus minimums still due in the first month', () => {
+    fc.assert(
+      fc.property(
+        debtArrayArbitrary,
+        fc.array(
+          fc.record({ debtIndex: fc.nat(9), amountMinor: fc.integer({ min: 1, max: 20_000 }) }),
+          {
+            maxLength: 6
+          }
+        ),
+        (debts, payments) => {
+          const monthlyBudgetMinor = debts.reduce(
+            (total, debt) =>
+              total +
+              debt.minimumPaymentMinor +
+              calculateMonthlyInterest(debt.balanceMinor, debt.aprBasisPoints ?? 0),
+            2_000
+          );
+          // Indexes past the last debt stand for debts already cleared this month.
+          const startMonthPayments = payments.map((payment) => ({
+            debtId: `debt-${payment.debtIndex}`,
+            amountMinor: payment.amountMinor
+          }));
+          const result = calculatePlan({
+            currency: 'GBP',
+            startMonth: '2026-01',
+            monthlyBudgetMinor,
+            debts,
+            startMonthPayments
+          });
+
+          expect(result.status).toBe('success');
+          if (result.status !== 'success') return;
+
+          const paidMinor = startMonthPayments.reduce(
+            (total, payment) => total + payment.amountMinor,
+            0
+          );
+          const [firstMonth] = result.months;
+          const requiredMinor = firstMonth.debts.reduce(
+            (total, row) => total + row.requiredPaymentMinor,
+            0
+          );
+          expect(firstMonth.totalPaymentMinor).toBeLessThanOrEqual(
+            Math.max(0, monthlyBudgetMinor - paidMinor - requiredMinor) + requiredMinor
+          );
+          for (const row of firstMonth.debts) {
+            const paidToDebt = startMonthPayments
+              .filter((payment) => payment.debtId === row.debtId)
+              .reduce((total, payment) => total + payment.amountMinor, 0);
+            const debt = debts.find((candidate) => candidate.debtId === row.debtId)!;
+            expect(row.requiredPaymentMinor).toBe(
+              Math.min(
+                Math.max(0, debt.minimumPaymentMinor - paidToDebt),
+                row.openingBalanceMinor + row.interestMinor
+              )
+            );
+          }
+          for (const month of result.months.slice(1)) {
+            expect(month.totalPaymentMinor).toBeLessThanOrEqual(monthlyBudgetMinor);
+          }
+        }
+      ),
+      { numRuns: 150 }
+    );
+  });
 });

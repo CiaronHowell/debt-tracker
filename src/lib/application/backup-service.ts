@@ -216,6 +216,13 @@ function validatePayloadRelations(input: unknown): BackupPayload {
     if (scenario.debtSnapshot.some((debt) => !debtIds.has(debt.debtId))) {
       throw new AppError('IMPORT_INVALID', 'A scenario snapshot references a missing debt.');
     }
+    assertUnique(
+      scenario.startMonthPayments.map((payment) => payment.debtId),
+      `start-month payments in scenario ${scenario.id}`
+    );
+    if (scenario.startMonthPayments.some((payment) => !debtIds.has(payment.debtId))) {
+      throw new AppError('IMPORT_INVALID', 'A scenario payment references a missing debt.');
+    }
   }
 
   const settings = payload.planSettings[0];

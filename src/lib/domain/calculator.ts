@@ -10,7 +10,8 @@ import type {
   PlanProjection,
   PromotionImpact,
   ProjectionWarning,
-  ScenarioDebtInput
+  ScenarioDebtInput,
+  StartMonthPayment
 } from './calculator.types';
 import {
   addMonths,
@@ -150,7 +151,33 @@ function validateInput(input: CalculatePlanInput): number {
     }
   }
 
+  for (const payment of input.startMonthPayments ?? []) {
+    if (typeof payment.debtId !== 'string' || payment.debtId.trim().length === 0) {
+      throw new DomainError('INVALID_MONEY', 'Every start-month payment requires a debtId.');
+    }
+    assertMoneyMinor(payment.amountMinor, `${payment.debtId}.startMonthPayment`);
+    if (payment.amountMinor === 0) {
+      throw new DomainError('INVALID_MONEY', 'Start-month payments must be greater than zero.', {
+        debtId: payment.debtId
+      });
+    }
+  }
+
   return maximumMonths;
+}
+
+/**
+ * Totals per debt for payments already made in the first projected month. Debts that are no
+ * longer active may appear here: their payments still used part of that month's budget.
+ */
+function startMonthPaymentsByDebt(
+  payments: readonly StartMonthPayment[] | undefined
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const payment of payments ?? []) {
+    totals.set(payment.debtId, checkedAdd(totals.get(payment.debtId) ?? 0, payment.amountMinor));
+  }
+  return totals;
 }
 
 function ordersMatch(left: readonly string[], right: readonly string[]): boolean {
@@ -523,8 +550,14 @@ function calculateValidatedPlan(
   );
   let totalInterestMinor = 0;
   let totalPaidMinor = 0;
+  const startMonthPaid = startMonthPaymentsByDebt(input.startMonthPayments);
+  const startMonthPaidTotal = sumMoney(startMonthPaid.values());
 
   for (let monthIndex = 0; monthIndex < maximumMonths; monthIndex += 1) {
+    // Payments already made in the first month count towards its minimums and budget, so the
+    // first month's rows show only what is still to pay.
+    const alreadyPaid = monthIndex === 0 ? startMonthPaid : undefined;
+    const alreadyPaidTotal = monthIndex === 0 ? startMonthPaidTotal : 0;
     const activeStates = snowballOrder
       .map((debtId) => states.get(debtId))
       .filter((state): state is DebtState => state !== undefined && state.balanceMinor > 0);
@@ -541,6 +574,7 @@ function calculateValidatedPlan(
     const openingBalances = new Map<string, number>();
     const interestByDebt = new Map<string, number>();
     const balancesAfterInterest = new Map<string, number>();
+    const minimumPayments = new Map<string, number>();
     const requiredPayments = new Map<string, number>();
     const payments = new Map<string, number>();
 
@@ -556,26 +590,33 @@ function calculateValidatedPlan(
           )
         : calculateMonthlyInterest(balanceMinor, debt.aprBasisPoints ?? 0);
       const balanceAfterInterest = checkedAdd(balanceMinor, interestMinor);
-      const requiredPayment = capPayment(debt.minimumPaymentMinor, balanceAfterInterest);
+      const paidMinor = alreadyPaid?.get(debt.debtId) ?? 0;
+      const outstandingMinimum =
+        debt.minimumPaymentMinor > paidMinor
+          ? checkedSubtract(debt.minimumPaymentMinor, paidMinor)
+          : 0;
+      const requiredPayment = capPayment(outstandingMinimum, balanceAfterInterest);
       interestByDebt.set(debt.debtId, interestMinor);
       balancesAfterInterest.set(debt.debtId, balanceAfterInterest);
+      minimumPayments.set(debt.debtId, capPayment(debt.minimumPaymentMinor, balanceAfterInterest));
       requiredPayments.set(debt.debtId, requiredPayment);
       payments.set(debt.debtId, requiredPayment);
     }
 
-    const totalRequiredPayments = sumMoney(requiredPayments.values());
-    if (input.monthlyBudgetMinor < totalRequiredPayments) {
+    const totalMinimumPayments = sumMoney(minimumPayments.values());
+    if (input.monthlyBudgetMinor < totalMinimumPayments) {
       return failure(
         'INSUFFICIENT_BUDGET',
         'The monthly budget does not cover this month’s required minimum payments.',
         {
           month: addMonths(input.startMonth, monthIndex),
           monthlyBudgetMinor: input.monthlyBudgetMinor,
-          requiredPaymentsMinor: totalRequiredPayments,
-          shortfallMinor: totalRequiredPayments - input.monthlyBudgetMinor
+          requiredPaymentsMinor: totalMinimumPayments,
+          shortfallMinor: totalMinimumPayments - input.monthlyBudgetMinor
         }
       );
     }
+    const totalRequiredPayments = sumMoney(requiredPayments.values());
 
     const balancesAfterMinimums = new Map<string, number>();
     for (const state of activeStates) {
@@ -586,7 +627,12 @@ function calculateValidatedPlan(
       );
     }
 
-    let remainingBudget = checkedSubtract(input.monthlyBudgetMinor, totalRequiredPayments);
+    // Paying more than planned earlier in the month never removes the remaining minimums.
+    const committedMinor = checkedAdd(alreadyPaidTotal, totalRequiredPayments);
+    let remainingBudget =
+      input.monthlyBudgetMinor > committedMinor
+        ? checkedSubtract(input.monthlyBudgetMinor, committedMinor)
+        : 0;
     for (const debtId of paymentOrder) {
       if (remainingBudget === 0) break;
       const outstandingBalance = balancesAfterMinimums.get(debtId) ?? 0;

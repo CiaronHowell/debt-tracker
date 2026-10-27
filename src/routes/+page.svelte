@@ -11,6 +11,7 @@
     LockKeyhole,
     RefreshCw,
     Target,
+    Trash2,
     TrendingDown,
     WalletCards
   } from '@lucide/svelte';
@@ -32,7 +33,7 @@
     type PayLaterSummary
   } from '$lib/application';
   import { getDatabase, getPersistenceMode, type Debt, type Payment } from '$lib/persistence';
-  import type { Currency } from '$lib/domain';
+  import { addMonths, type Currency, type StartMonthPayment } from '$lib/domain';
   import {
     currentLocalDate,
     currentLocalMonth,
@@ -56,6 +57,7 @@
   let debts = $state<Debt[]>([]);
   let recentPayments = $state<Payment[]>([]);
   let totalPaidMinor = $state(0);
+  let paidThisMonth = $state<StartMonthPayment[]>([]);
   let currency = $state<Currency>('GBP');
   let loading = $state(true);
   let error = $state('');
@@ -65,6 +67,8 @@
   let reviewVisible = $state(false);
   let updatingPlan = $state(false);
   let latestPayment = $state<Payment | null>(null);
+  let removalCandidate = $state<Payment | null>(null);
+  let removingPayment = $state(false);
   let recordButton = $state<HTMLButtonElement>();
   let reviewPanel = $state<HTMLElement>();
 
@@ -80,9 +84,28 @@
     if (!planMonth?.targetDebtId) return null;
     return planMonth.debts.find((debt) => debt.debtId === planMonth?.targetDebtId) ?? null;
   });
+  // Payments already made this month are taken off the plan's first month, so the headline is
+  // the target while it still has something to pay, then any minimum still due.
+  let headline = $derived.by(() => {
+    if (!planMonth) return null;
+    if (target && target.paymentMinor > 0) return target;
+    return planMonth.debts.find((debt) => debt.paymentMinor > 0) ?? null;
+  });
+  let paidThisMonthMinor = $derived(
+    planMonth?.month === currentMonth
+      ? paidThisMonth.reduce((total, payment) => total + payment.amountMinor, 0)
+      : 0
+  );
+  let nextMonthPayment = $derived.by(() => {
+    if (!displayProjection) return null;
+    const nextMonth = addMonths(currentMonth, 1);
+    const row = projectionMonthFor(displayProjection, nextMonth);
+    if (row?.month !== nextMonth) return null;
+    return row.debts.find((debt) => debt.debtId === row.targetDebtId) ?? null;
+  });
   let otherMinimums = $derived(
     planMonth?.debts.filter(
-      (debt) => debt.debtId !== planMonth?.targetDebtId && debt.requiredPaymentMinor > 0
+      (debt) => debt.debtId !== headline?.debtId && debt.requiredPaymentMinor > 0
     ) ?? []
   );
   let totalDebtMinor = $derived(debts.reduce((total, debt) => total + debt.currentBalanceMinor, 0));
@@ -90,8 +113,18 @@
     displayProjection ? (upcomingMilestones(displayProjection, currentMonth)[0] ?? null) : null
   );
   let suggestedAmounts = $derived.by(() =>
-    Object.fromEntries(planMonth?.debts.map((debt) => [debt.debtId, debt.paymentMinor]) ?? [])
+    Object.fromEntries(
+      planMonth?.debts
+        .filter((debt) => debt.paymentMinor > 0)
+        .map((debt) => [debt.debtId, debt.paymentMinor]) ?? []
+    )
   );
+  let paymentDefault = $derived.by(() => {
+    if (headline) return { debtId: headline.debtId, amountMinor: headline.paymentMinor };
+    if (!target) return null;
+    const minimum = debts.find((debt) => debt.id === target?.debtId)?.minimumPaymentMinor ?? 0;
+    return { debtId: target.debtId, amountMinor: minimum };
+  });
   let explanations = $derived(
     review?.comparison ? explainPlanChanges(review.comparison, currency) : []
   );
@@ -105,18 +138,21 @@
     if (initial) loading = true;
     error = '';
     currentMonth = currentLocalMonth();
-    const [planReview, activeDebts, history, settings, commitments] = await Promise.all([
-      planService.getActivePlanReview(currentMonth),
-      debtService.listActive(),
-      paymentService.history(),
-      planService.getSettings(),
-      payLaterService.summary(currentLocalDate())
-    ]);
+    const [planReview, activeDebts, history, monthPayments, settings, commitments] =
+      await Promise.all([
+        planService.getActivePlanReview(currentMonth),
+        debtService.listActive(),
+        paymentService.history(),
+        paymentService.paidInMonth(currentMonth),
+        planService.getSettings(),
+        payLaterService.summary(currentLocalDate())
+      ]);
     review = planReview;
     payLaterSummary = commitments;
     debts = activeDebts;
     recentPayments = history.recent;
     totalPaidMinor = history.totalPaidMinor;
+    paidThisMonth = monthPayments;
     currency = settings?.currency ?? 'GBP';
     reviewVisible = Boolean(planReview?.isStale);
     if (initial) loading = false;
@@ -176,13 +212,7 @@
     updatingPlan = true;
     error = '';
     try {
-      await scenarioService.createAndActivate({
-        name: 'Updated payment plan',
-        monthlyBudgetMinor: review.scenario.monthlyBudgetMinor,
-        startMonth: review.currentStartMonth,
-        algorithm: review.scenario.algorithm,
-        sourceScenarioId: review.scenario.id
-      });
+      await scenarioService.refresh(review.scenario.id, currentMonth);
       latestPayment = null;
       reconciliationOpen = false;
       await loadData();
@@ -193,6 +223,31 @@
       error = cause instanceof Error ? cause.message : 'The updated plan could not be activated.';
     } finally {
       updatingPlan = false;
+    }
+  }
+
+  async function removePayment(): Promise<void> {
+    if (!removalCandidate) return;
+    const payment = removalCandidate;
+    const name = debtName(payment.debtId);
+    removingPayment = true;
+    error = '';
+    statusMessage = '';
+    try {
+      const removal = await paymentService.remove(payment.id);
+      removalCandidate = null;
+      if (latestPayment?.id === payment.id) latestPayment = null;
+      await loadData();
+      statusMessage =
+        removal.balanceRestored && removal.balanceAfterMinor !== null
+          ? `Payment removed. ${name}'s balance is back to ${formatMoney(removal.balanceAfterMinor, currency)}.`
+          : removal.balanceAfterMinor !== null
+            ? `Payment removed. ${name} keeps the statement balance you entered later.`
+            : 'Payment removed.';
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : 'The payment could not be removed.';
+    } finally {
+      removingPayment = false;
     }
   }
 
@@ -237,13 +292,31 @@
         <p class="card-label">
           {review.isStale ? 'Updated recommendation' : 'Recommended this month'}
         </p>
-        <h2 id="next-payment-title">
-          Pay {formatMoney(target.paymentMinor, currency)} to {target.name}
-        </h2>
+        {#if headline}
+          <h2 id="next-payment-title">
+            Pay {formatMoney(headline.paymentMinor, currency)} to {headline.name}
+          </h2>
+        {:else}
+          <h2 id="next-payment-title">You've made this month's planned payments</h2>
+        {/if}
+        {#if paidThisMonthMinor > 0}
+          <p class="paid-this-month">
+            {formatMoney(paidThisMonthMinor, currency)} already paid this month.
+          </p>
+        {/if}
         <p>
-          {review.isStale
-            ? 'Review how your latest payment or balance changed the plan before recording another.'
-            : 'This includes the minimum payment and the extra amount available for your current target.'}
+          {#if review.isStale}
+            Review how your latest payment or balance changed the plan before recording another.
+          {:else if !headline}
+            {nextMonthPayment
+              ? `Next month, pay ${formatMoney(nextMonthPayment.paymentMinor, currency)} to ${nextMonthPayment.name}.`
+              : 'There is nothing left to pay in this plan.'}
+          {:else if headline.debtId !== target.debtId}
+            This is the minimum payment still due this month.
+          {:else}
+            This includes the minimum payment and the extra amount available for your current
+            target.
+          {/if}
         </p>
       </div>
       <div class="action-buttons">
@@ -467,7 +540,17 @@
                   <strong>{debtName(payment.debtId)}</strong>
                   <span>{formatCalendarDate(payment.paidOn)}</span>
                 </div>
-                <strong>{formatMoney(payment.amountMinor, currency)}</strong>
+                <span class="payment-history-actions">
+                  <strong>{formatMoney(payment.amountMinor, currency)}</strong>
+                  <button
+                    class="icon-button danger"
+                    type="button"
+                    aria-label={`Remove ${formatMoney(payment.amountMinor, currency)} payment to ${debtName(payment.debtId)} on ${formatCalendarDate(payment.paidOn)}`}
+                    onclick={() => (removalCandidate = payment)}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </span>
               </li>
             {/each}
           </ul>
@@ -476,6 +559,36 @@
         {/if}
       </section>
     </div>
+  {/if}
+
+  {#if removalCandidate}
+    <dialog
+      open
+      class="confirmation-bar"
+      aria-labelledby="remove-payment-title"
+      aria-describedby="remove-payment-copy"
+    >
+      <div>
+        <h2 id="remove-payment-title">Remove this payment?</h2>
+        <p id="remove-payment-copy">
+          {formatMoney(removalCandidate.amountMinor, currency)} to {debtName(
+            removalCandidate.debtId
+          )} on {formatCalendarDate(removalCandidate.paidOn)}. Its amount is added back to the
+          debt's balance.
+        </p>
+      </div>
+      <div class="confirmation-actions">
+        <button class="button secondary" type="button" onclick={() => (removalCandidate = null)}
+          >Keep payment</button
+        >
+        <button
+          class="button danger-button"
+          type="button"
+          disabled={removingPayment}
+          onclick={removePayment}>Remove payment</button
+        >
+      </div>
+    </dialog>
   {/if}
 
   <section class="notice-card">
@@ -487,7 +600,7 @@
   </section>
 </div>
 
-{#if paymentOpen && target}
+{#if paymentOpen && paymentDefault}
   <div class="dialog-backdrop">
     <dialog
       use:modal
@@ -507,8 +620,8 @@
       <PaymentForm
         {debts}
         {currency}
-        defaultDebtId={target.debtId}
-        defaultAmountMinor={target.paymentMinor}
+        defaultDebtId={paymentDefault.debtId}
+        defaultAmountMinor={paymentDefault.amountMinor}
         {suggestedAmounts}
         onsave={recordPayment}
         oncancel={closePayment}

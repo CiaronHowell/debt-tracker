@@ -249,13 +249,14 @@ interface Scenario {
   startMonth: string;
   algorithm: 'snowball';
   debtSnapshot: ScenarioDebtInput[];
+  startMonthPayments: { debtId: string; amountMinor: MoneyMinor }[];
   sourceScenarioId: string | null;
   createdAt: string;
   updatedAt: string;
 }
 ```
 
-A scenario captures its debt inputs so its displayed result does not silently change. If canonical debt data changes, compare a deterministic fingerprint and mark the scenario as stale. The user may refresh a stale scenario using current balances, which creates a new snapshot and updates `updatedAt`.
+A scenario captures its debt inputs so its displayed result does not silently change. `startMonthPayments` holds the per-debt totals of payments dated in `startMonth` when the snapshot was taken, because those payments already used part of that month's budget (§17). If canonical debt data changes, or the payments dated in the scenario's start month no longer match `startMonthPayments`, mark the scenario as stale. The user may refresh a stale scenario using current balances. Refreshing updates the scenario in place: it takes a new debt snapshot and start-month payments, moves a start month that has already passed to the current month, and updates `updatedAt`.
 
 The active scenario is the current plan. Draft planner changes exist only in UI state until the user selects **Save as scenario** or **Make active plan**.
 
@@ -275,6 +276,8 @@ interface Payment {
 ```
 
 Recording a payment subtracts it from the last known balance, capped at zero, and marks the resulting debt balance as `estimated`. The payment and debt update occur in one database transaction.
+
+Removing a payment deletes it and the `payment-estimate` snapshot it created, in one transaction. It adds back the amount the payment took off the balance (`balanceBeforeMinor − estimatedBalanceAfterMinor`). The debt's `balanceAsOf` and `balanceSource` are taken from its latest remaining snapshot. If a `statement` or `manual-correction` balance was entered after the payment, that balance already reflects reality and is left unchanged.
 
 ### 4.5 Balance snapshot
 
@@ -448,13 +451,17 @@ Render in this order:
 
 The primary CTA is **Record payment**. It opens a form pre-filled with target debt, recommended amount, and today's date.
 
+The recommended payment is what is still to pay this month. Payments dated in the current month count towards that month's minimums and budget. When nothing is left to pay, the card says the month's planned payments are made and previews next month's target payment.
+
 After recording:
 
 - Show the estimated resulting balance.
 - Regenerate a draft from canonical current balances.
 - Compare old and new projections.
 - Explain changes to payoff date, order, interest, and next target.
-- Require confirmation before replacing the active scenario snapshot.
+- Require confirmation before replacing the active scenario snapshot. Confirming refreshes the active scenario in place (§4.3); it never adds another saved plan.
+
+Each recent payment can be removed after an in-page confirmation (§4.4).
 
 ### 6.3 `/debts`
 
@@ -833,6 +840,14 @@ The implemented domain contract extends the abbreviated interfaces above with th
 - `PlanProjection.minimumOnlyComparison` contains the available comparison metrics or a typed `NON_CONVERGING_DEBT` reason.
 
 These additions do not change persisted v1 data requirements: omitted `balanceSource` is treated as user-entered, and `previousPayoffOrder` is calculation context rather than persisted scenario data.
+
+`CalculatePlanInput.startMonthPayments?: { debtId, amountMinor }[]` lists payments already made in the first projected month. Repeated debt ids are summed. Ids for debts no longer in `debts` are allowed, because a debt cleared earlier in the month still used budget. The first month only:
+
+- Still fails with `INSUFFICIENT_BUDGET` if the budget cannot cover the configured minimums.
+- Reduces each debt's required payment by what was already paid to it, capped at zero.
+- Spreads only `max(0, budget − already paid − remaining required)` as extra payment. Remaining minimums are planned even when earlier payments exceeded the budget.
+
+The first month's `requiredPaymentMinor` and `paymentMinor` therefore mean "still to pay". IndexedDB version 4 persists `Scenario.startMonthPayments`, backfilling `[]`. Backups omitting the field import with `[]`.
 
 ## 18. Post-MVP extension — Pay later commitments
 

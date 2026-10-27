@@ -4,6 +4,7 @@ import type { PlainBackupEnvelope } from '$lib/persistence/models';
 import { BackupService } from './backup-service';
 import { DebtService } from './debt-service';
 import { PayLaterService } from './pay-later-service';
+import { PaymentService } from './payment-service';
 import { PlanService } from './plan-service';
 import { ScenarioService } from './scenario-service';
 
@@ -77,6 +78,14 @@ describe('BackupService', () => {
       missedDeadlineAprBasisPoints: 3_499,
       notes: ''
     });
+    await new PaymentService(source, {
+      now: () => FIXED_NOW,
+      createId: idSequence('payment-source', 'payment-snapshot-source')
+    }).record({ debtId: 'debt-source', amountMinor: 2_000, paidOn: '2026-08-28', note: '' });
+    await new ScenarioService(source, { now: () => FIXED_NOW }).refresh(
+      'scenario-source',
+      '2026-08'
+    );
     const sourceBackups = new BackupService(source, { now: () => FIXED_NOW });
     const envelope = await sourceBackups.exportPlain();
 
@@ -98,6 +107,9 @@ describe('BackupService', () => {
     await expect(target.debts.get('debt-source')).resolves.toMatchObject({
       name: 'Card source'
     });
+    await expect(target.scenarios.get('scenario-source')).resolves.toMatchObject({
+      startMonthPayments: [{ debtId: 'debt-source', amountMinor: 2_000 }]
+    });
     await expect(target.payLaterPlans.get('pay-later-source')).resolves.toMatchObject({
       name: 'Recovery purchase',
       currentBalanceMinor: 24_000
@@ -114,13 +126,17 @@ describe('BackupService', () => {
     const legacy = structuredClone(await sourceBackups.exportPlain()) as unknown as {
       payload: {
         debts: Array<Record<string, unknown>>;
-        scenarios: Array<{ debtSnapshot: Array<Record<string, unknown>> }>;
+        scenarios: Array<{
+          debtSnapshot: Array<Record<string, unknown>>;
+          startMonthPayments?: unknown;
+        }>;
         payLaterPlans?: unknown;
         payLaterPayments?: unknown;
       };
     };
     delete legacy.payload.debts[0]!.promotionalAprEndsOn;
     delete legacy.payload.scenarios[0]!.debtSnapshot[0]!.promotionalAprEndsOn;
+    delete legacy.payload.scenarios[0]!.startMonthPayments;
     delete legacy.payload.payLaterPlans;
     delete legacy.payload.payLaterPayments;
 
@@ -132,7 +148,8 @@ describe('BackupService', () => {
       promotionalAprEndsOn: null
     });
     await expect(target.scenarios.get('scenario-legacy')).resolves.toMatchObject({
-      debtSnapshot: [expect.objectContaining({ promotionalAprEndsOn: null })]
+      debtSnapshot: [expect.objectContaining({ promotionalAprEndsOn: null })],
+      startMonthPayments: []
     });
   });
 
@@ -194,6 +211,15 @@ describe('BackupService', () => {
     const orphaned = structuredClone(envelope);
     orphaned.payload.scenarios[0]!.debtSnapshot[0]!.debtId = 'missing-debt';
     await expect(targetBackups.importBackup(orphaned)).rejects.toMatchObject({
+      code: 'IMPORT_INVALID'
+    });
+    await expect(target.debts.toArray()).resolves.toEqual(before);
+
+    const orphanedPayment = structuredClone(envelope);
+    orphanedPayment.payload.scenarios[0]!.startMonthPayments = [
+      { debtId: 'missing-debt', amountMinor: 100 }
+    ];
+    await expect(targetBackups.importBackup(orphanedPayment)).rejects.toMatchObject({
       code: 'IMPORT_INVALID'
     });
     await expect(target.debts.toArray()).resolves.toEqual(before);

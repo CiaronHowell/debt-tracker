@@ -3,7 +3,8 @@ import {
   calculatePlan,
   type CalculationFailure,
   type PlanProjection,
-  type ScenarioDebtInput
+  type ScenarioDebtInput,
+  type StartMonthPayment
 } from '$lib/domain';
 import type { DebtTrackerDatabase } from '$lib/persistence/db';
 import { scenarioFingerprint } from '$lib/persistence/fingerprint';
@@ -13,7 +14,11 @@ import { moneyMinorSchema, parsePlanSettings, yearMonthSchema } from '$lib/persi
 import { runWriteTransaction } from '$lib/persistence/transactions';
 import { AppError, persistenceWriteError } from './errors';
 import { comparePlanProjections, type PlanProjectionComparison } from './plan-comparison';
-import { planStartMonth } from './plan-workspace';
+import {
+  aggregateStartMonthPayments,
+  planStartMonth,
+  sameStartMonthPayments
+} from './plan-workspace';
 import { resolveDependencies, type ServiceDependencies } from './service-utils';
 import { validateInput } from './validation';
 
@@ -58,7 +63,8 @@ export function calculateScenarioProjection(
     startMonth: scenario.startMonth,
     monthlyBudgetMinor: scenario.monthlyBudgetMinor,
     algorithm: scenario.algorithm,
-    debts: scenario.debtSnapshot
+    debts: scenario.debtSnapshot,
+    startMonthPayments: scenario.startMonthPayments
   });
 
   if (result.status === 'success') return result;
@@ -83,6 +89,10 @@ export class PlanService {
   ) {
     this.repositories = createRepositories(database);
     this.dependencies = resolveDependencies(dependencies);
+  }
+
+  private async paymentsMadeIn(month: string): Promise<StartMonthPayment[]> {
+    return aggregateStartMonthPayments(await this.repositories.payments.inMonth(month));
   }
 
   getSettings(): Promise<PlanSettings | undefined> {
@@ -137,14 +147,20 @@ export class PlanService {
     const currentDebts = (await this.repositories.debts.active())
       .filter((debt) => debt.currentBalanceMinor > 0)
       .map(debtToScenarioInput);
-    const [savedFingerprint, currentFingerprint] = await Promise.all([
-      scenarioFingerprint(scenario.debtSnapshot),
-      scenarioFingerprint(currentDebts)
-    ]);
-    const isStale = savedFingerprint !== currentFingerprint;
     const currentStartMonth = currentMonth
       ? planStartMonth(scenario.startMonth, currentMonth)
       : scenario.startMonth;
+    const [savedFingerprint, currentFingerprint, scenarioMonthPayments, currentMonthPayments] =
+      await Promise.all([
+        scenarioFingerprint(scenario.debtSnapshot),
+        scenarioFingerprint(currentDebts),
+        this.paymentsMadeIn(scenario.startMonth),
+        this.paymentsMadeIn(currentStartMonth)
+      ]);
+    // A payment added or removed in the plan's first month changes what is left to pay.
+    const isStale =
+      savedFingerprint !== currentFingerprint ||
+      !sameStartMonthPayments(scenario.startMonthPayments, scenarioMonthPayments);
 
     if (!isStale) {
       return {
@@ -164,7 +180,8 @@ export class PlanService {
       monthlyBudgetMinor: scenario.monthlyBudgetMinor,
       algorithm: scenario.algorithm,
       debts: currentDebts,
-      previousPayoffOrder: activeProjection.payoffOrder
+      previousPayoffOrder: activeProjection.payoffOrder,
+      startMonthPayments: currentMonthPayments
     });
     if (currentResult.status === 'failure') {
       return {

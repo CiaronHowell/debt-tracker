@@ -1,4 +1,10 @@
-import type { Currency, MoneyMinor, PayoffAlgorithm, ScenarioDebtInput } from '$lib/domain';
+import type {
+  Currency,
+  MoneyMinor,
+  PayoffAlgorithm,
+  ScenarioDebtInput,
+  StartMonthPayment
+} from '$lib/domain';
 
 export type DebtType = 'credit-card' | 'balance-transfer' | 'loan' | 'overdraft' | 'other';
 export type BalanceSource = 'user' | 'estimated';
@@ -40,6 +46,8 @@ export interface Scenario {
   startMonth: string;
   algorithm: PayoffAlgorithm;
   debtSnapshot: ScenarioDebtInput[];
+  /** Payments already made in `startMonth` when the snapshot was taken. */
+  startMonthPayments: StartMonthPayment[];
   sourceScenarioId: string | null;
   createdAt: string;
   updatedAt: string;

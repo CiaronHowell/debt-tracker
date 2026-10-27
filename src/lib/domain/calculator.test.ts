@@ -383,6 +383,102 @@ describe('calculatePlan', () => {
   });
 });
 
+describe('payments already made in the start month', () => {
+  const debts = [debt('small', 6_000, 2_500), debt('large', 50_000, 5_000)];
+
+  it('plans only what is left of the first month after a partial target payment', () => {
+    const projection = expectSuccess(
+      calculatePlan(
+        input(debts, 15_000, { startMonthPayments: [{ debtId: 'small', amountMinor: 4_000 }] })
+      )
+    );
+
+    expect(projection.months[0].targetDebtId).toBe('small');
+    expect(projection.months[0].debts).toEqual([
+      expect.objectContaining({ debtId: 'small', requiredPaymentMinor: 0, paymentMinor: 6_000 }),
+      expect.objectContaining({ debtId: 'large', requiredPaymentMinor: 5_000, paymentMinor: 5_000 })
+    ]);
+    expect(projection.months[1].debts).toEqual([
+      expect.objectContaining({ debtId: 'large', paymentMinor: 15_000 })
+    ]);
+  });
+
+  it('counts payments to debts cleared earlier in the month against the budget', () => {
+    const projection = expectSuccess(
+      calculatePlan(
+        input([debt('large', 50_000, 5_000)], 15_000, {
+          startMonthPayments: [{ debtId: 'small', amountMinor: 10_000 }]
+        })
+      )
+    );
+
+    expect(projection.months[0]).toMatchObject({ targetDebtId: 'large', totalPaymentMinor: 5_000 });
+    expect(projection.months[1].totalPaymentMinor).toBe(15_000);
+  });
+
+  it('still plans remaining minimums when more than the budget was already paid', () => {
+    const projection = expectSuccess(
+      calculatePlan(
+        input(debts, 15_000, { startMonthPayments: [{ debtId: 'small', amountMinor: 20_000 }] })
+      )
+    );
+
+    expect(projection.months[0].debts.map((row) => row.paymentMinor)).toEqual([0, 5_000]);
+    expect(projection.months[1].totalPaymentMinor).toBe(15_000);
+  });
+
+  it('sums repeated payments to the same debt', () => {
+    expect(
+      calculatePlan(
+        input(debts, 15_000, {
+          startMonthPayments: [
+            { debtId: 'small', amountMinor: 1_000 },
+            { debtId: 'small', amountMinor: 3_000 }
+          ]
+        })
+      )
+    ).toEqual(
+      calculatePlan(
+        input(debts, 15_000, { startMonthPayments: [{ debtId: 'small', amountMinor: 4_000 }] })
+      )
+    );
+  });
+
+  it('matches a plan without payments when none are given', () => {
+    expect(calculatePlan(input(debts, 15_000, { startMonthPayments: [] }))).toEqual(
+      calculatePlan(input(debts, 15_000))
+    );
+  });
+
+  it('still reports a budget that cannot cover the configured minimums', () => {
+    expect(
+      calculatePlan(
+        input([debt('a', 1_000, 200), debt('b', 1_000, 300)], 400, {
+          startMonthPayments: [{ debtId: 'a', amountMinor: 200 }]
+        })
+      )
+    ).toMatchObject({
+      status: 'failure',
+      code: 'INSUFFICIENT_BUDGET',
+      details: { requiredPaymentsMinor: 500, shortfallMinor: 100 }
+    });
+  });
+
+  it('rejects payments that are not positive', () => {
+    for (const amountMinor of [0, -1, 1.5]) {
+      expect(
+        calculatePlan(
+          input(debts, 15_000, { startMonthPayments: [{ debtId: 'small', amountMinor }] })
+        )
+      ).toMatchObject({
+        status: 'failure',
+        code: 'INVALID_INPUT',
+        details: { domainCode: 'INVALID_MONEY' }
+      });
+    }
+  });
+});
+
 describe('projection metadata', () => {
   it('records payoff milestones and the next target payment', () => {
     const projection = expectSuccess(

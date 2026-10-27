@@ -280,7 +280,7 @@
   async function refreshSelected(): Promise<void> {
     if (!selected) return;
     await runAction(async () => {
-      const refreshed = await scenarioService.refresh(selected.scenario.id);
+      const refreshed = await scenarioService.refresh(selected.scenario.id, currentLocalMonth());
       await loadWorkspace(refreshed.id);
       statusMessage = `${refreshed.name} now uses your current balances.`;
     });

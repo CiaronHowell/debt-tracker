@@ -1,7 +1,7 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DebtTrackerDatabase } from './db';
-import { DATABASE_VERSION, LEGACY_SCHEMA, V1_SCHEMA } from './migrations';
+import { DATABASE_VERSION, LEGACY_SCHEMA, V1_SCHEMA, V3_SCHEMA } from './migrations';
 import type { Debt } from './models';
 import { runWriteTransaction } from './transactions';
 
@@ -128,9 +128,56 @@ describe('DebtTrackerDatabase', () => {
       promotionalAprEndsOn: null
     });
     await expect(database.scenarios.get('scenario-1')).resolves.toMatchObject({
-      debtSnapshot: [expect.objectContaining({ promotionalAprEndsOn: null })]
+      debtSnapshot: [expect.objectContaining({ promotionalAprEndsOn: null })],
+      startMonthPayments: []
     });
-    await expect(database.appMeta.get('schema-version')).resolves.toMatchObject({ value: 3 });
+    await expect(database.appMeta.get('schema-version')).resolves.toMatchObject({
+      value: DATABASE_VERSION
+    });
+  });
+
+  it('migrates v3 scenarios to record no start-month payments', async () => {
+    const name = `debt-tracker-v4-migration-${crypto.randomUUID()}`;
+    const v3 = new Dexie(name);
+    v3.version(3).stores(V3_SCHEMA);
+    await v3.open();
+
+    await v3.table('debts').add(validDebt());
+    await v3.table('scenarios').add({
+      id: 'scenario-1',
+      name: 'Saved plan',
+      monthlyBudgetMinor: 2_000,
+      startMonth: '2026-08',
+      algorithm: 'snowball',
+      debtSnapshot: [
+        {
+          debtId: 'debt-1',
+          name: 'Card',
+          balanceMinor: 10_000,
+          aprBasisPoints: 1_999,
+          promotionalAprEndsOn: null,
+          minimumPaymentMinor: 1_000,
+          createdAt: FIXED_NOW,
+          balanceSource: 'user'
+        }
+      ],
+      sourceScenarioId: null,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW
+    });
+    v3.close();
+
+    const database = new DebtTrackerDatabase(name);
+    databases.push(database);
+    await database.open();
+
+    expect(database.verno).toBe(DATABASE_VERSION);
+    await expect(database.scenarios.get('scenario-1')).resolves.toMatchObject({
+      startMonthPayments: []
+    });
+    await expect(database.appMeta.get('schema-version')).resolves.toMatchObject({
+      value: DATABASE_VERSION
+    });
   });
 
   it('rolls back every entity and metadata write when a command fails', async () => {
